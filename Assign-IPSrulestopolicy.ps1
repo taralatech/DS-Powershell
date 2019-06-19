@@ -1,7 +1,7 @@
 ﻿<#
 Run this script as .\Assign-IPSrulestopolicy "secretkey" "<full path to csv file>"
 Example: .\Assign-IPSrulestopolicy "31:Aab1254fgjkdfgkhdfg=" "c:\scripts\mycsvfile.csv"
-The script file location is not mandatory.  It can be specified belos
+The script file location is not mandatory.  It can be specified below instead.
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
@@ -9,7 +9,7 @@ param (
 )
 
 #Alternatively enter the csv file location here
-$csvfile = "c:\scripts\csv\machinetoPolicy.csv"
+#$csvfile = "c:\scripts\csv\machinetoPolicy.csv"
 #enter the timeout for REST queries here
 $resttimeout = 30
 #Enter the full path to the logfile here without the slash at the end
@@ -145,8 +145,6 @@ ForEach ( $hostline in $Hostpolicies )
             Add-Content $logfile "-------------------------------------------------------------------"
             write-host $policyrulenumbersassigned
             #Now change the policy rules
-            #Put https://dsm.example.com:4119/api/policies/{policyID}/intrusionprevention/assignments
-
             $json = @{
                     "ruleIDs" = $fullruleset
                   } | ConvertTo-Json
