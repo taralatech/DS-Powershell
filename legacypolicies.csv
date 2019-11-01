@@ -1,2 +1,2 @@
-"PolicynameID","PolicyIDYes"
-"Windows_Legacy",0
+"PolicynameID","PolicyIDYes","MinSeverity"
+"Windows_Legacy",0,"High"
