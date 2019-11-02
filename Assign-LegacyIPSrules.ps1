@@ -2,6 +2,13 @@
 Run this script as .\Assign-LegacyIPSrules "secretkey" "<full path to csv file>"
 Example: .\Assign-LegacyIPSrules "31:Aab1254fgjkdfgkhdfg=" "c:\scripts\mycsvfile.csv"
 The script file location is not mandatory.  It can be specified below instead.
+
+todo:
+*As each computers rule assignments are checked for severtiy and application type, add to global list of IPS rules if not already present.
+ Check each rule for severity.  Store results in hashtable that includes severity and whether it matches a "banned" application type.
+ Use hasbtable to lookup severity when filtering rules per computer rather than doing API call.
+ check lines 308, 309 and 407 for progress
+
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
@@ -20,6 +27,7 @@ $dsmanager = "https://app.deepsecurity.trendmicro.com/"
 $date = ( get-date ).ToString('yyyyMMddhhmmss')
 $logfile = New-Item -type file "$logfilepath\Assign-LegacyIPSrules-$date.txt"
 $dropapptypes = "Web Client Common", "Web Client Internet Explorer/Edge", "Web Client Mozilla Firefox", "Microsoft Office"
+$ipsruletable = @{}
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $headers = @{
@@ -28,6 +36,164 @@ $headers = @{
             'API-Version' = 'v1'
             }
 Add-Content $logfile "Assignment of Legacy IPS rules started - DS manager URL - $DSmanager"
+
+Function Get-IPSrulesfromDSM
+    {
+    #Function takes an array of IPS rule ID's and outputs a hashtable of rule ID's and their severity
+    [CmdletBinding()]
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [int32[]]$ruleids
+        )
+    BEGIN
+        {
+        $iruletable = @{}
+        }
+    PROCESS
+        {
+        ForEach ($ruleid in $ruleids)
+            {
+            $json = @{
+                      "maxItems" = 1
+                      "searchCriteria" = @{
+                                          "fieldName" = "ID"
+                                          "numericTest" = "equal"
+                                          "numericValue" = $ruleid
+                                          }
+                      "sortByObjectID" = "true"
+                     } | ConvertTo-Json  
+            $ipsruleuri = $dsmanager + 'api/intrusionpreventionrules/' + $ruleid
+            $ipsruleobject = Invoke-RestMethod -Headers $headers -method Get -Uri $ipsruleuri -TimeoutSec $resttimeout
+            $iruletable.Add($ipsruleobject.ID,$ipsruleobject.severity)           
+            }
+        }
+    END
+        {
+        return $iruletable
+        }
+    }
+ 
+
+Function Update-IPSruletable
+    {
+    #adds two hashtables together.  Outputs a hashtable without duplicates
+    [CmdletBinding()]
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [hashtable]$ruletable,
+        [Parameter(mandatory=$true)]
+        [hashtable]$rulestoadd
+        )
+    PROCESS
+        {
+        ForEach ($ruletoadd in $rulestoadd.keys)
+            {
+            if ($ruletable.ContainsKey($ruletoadd) -ne $true)
+                {
+                $ruletable.Add($ruletoadd,"banned")
+                }
+            }
+        }
+    END
+        {
+        return $ruletable
+        }
+    }
+ 
+
+Function Get-RuleIDsfromapptypes
+    {
+    #input array of app type ID's
+    #return array if IPS rule ID's that use any of those Application types.
+    #$apptypeids =int32 array
+    #Assumes that an IPS rule is only returned once.  I.e. no duplicate rules due to duplicate App types
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [int32[]]$apptypeids
+        )
+    BEGIN
+        {
+        $apptypesearchuri = $dsmanager + 'api/intrusionpreventionrules/search/'
+        $fullipsrulehashtable = @{}
+        }
+    PROCESS
+        {
+        ForEach ($apptypeid in $apptypeids)
+            {
+            $json = @{
+                    "maxItems" = 4000
+                    "searchCriteria" = @{
+                                        "fieldName" = "applicationTypeID"
+                                        "numericTest" = "equal"
+                                        "numericValue" = $apptypeid
+                                        }
+                    "sortByObjectID" = "true"
+                    } | ConvertTo-Json 
+            $ipsruleobjects = Invoke-RestMethod -Headers $headers -method Post -Uri $apptypesearchuri -body $json -TimeoutSec $resttimeout
+            $ipsruleobjects.intrusionPreventionRules | ForEach {$fullipsrulehashtable.Add($_.ID,"banned")}
+            }
+        }
+    END
+        {
+        return $fullipsrulehashtable
+        }
+    }
+
+Function Remove-ClientAndBelowSeverityrules
+    {
+    #Function takes in an Array of Rules recommended to assign, assigned, recommended to unassign, Application type ID's and Minimum severity.
+    #It returns acustom object where $_.Rulestoassign is all rules that need to be added.  i.e. what was recommended to assign minus rules below threshold/with app types listed
+    # $_.Rulestoremove returns bults to unassign plus the assigned rules that are below threshold and match the IPS aaplication types.
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [int32[]]$recotoassign,
+        [Parameter(mandatory=$true)]
+        [int32[]]$assigned,
+        [Parameter(mandatory=$true)]
+        [int32[]]$recotounassign,
+        [Parameter(mandatory=$true)]
+        [hashtable]$ipsruletable,
+        [Parameter(mandatory=$true)]
+        [string]$minseverity
+        )
+
+    BEGIN
+        {
+        if($minseverity = "Low")
+            {
+            $acceptableseverity = "Low" , "Medium" , "High" , "Critical"
+            }
+        elseif($minseverity = "Medium")
+            {
+            $acceptableseverity = "Medium" , "High" , "Critical"
+            }
+        elseif($minseverity = "High")
+            {
+            $acceptableseverity = "High" , "Critical"
+            }
+       elseif($minseverity = "Critical")
+            {
+            $acceptableseverity = "Critical"
+            }
+        }
+    PROCESS
+        {
+        #$recotoassign - remove unneeded rules
+        ForEach ($ruleid in $recotoassign)
+            {
+
+            }
+        }
+    END
+        {
+        #return hashtable of int32keys and string values for IPS rule ID's and their severity"
+        }
+    }
+
 Function Update-ComputerDescription
     {
     #Function takes a policy ID and updates its description to state this script has been ran and when.
@@ -229,7 +395,10 @@ Function Apply-LegacyRulesToComputers
             $fullruleset = $rulenumbersassigned + $rulestoassign | where {$rulestoremove -notcontains $_}
             Add-Content $logfile "Fullruleset: $fullruleset"
             write-host $rulenumbersassigned
-            write-host "Foreach end"
+            #update ips rule table for all rules
+            $rulestochange = Remove-ClientAndBelowSeverityrules -recotoassign $rulestoassign -assigned $rulenumbersassigned -recotounassign $rulestoremove -apptypeids $apptypeids -minseverity $minseverity
+            # $rulestochange | update-ipsruletable#need to create this function
+            # replace-computeripsrules #need to create this function
             }
         }
     END
@@ -313,7 +482,11 @@ Function Apply-LegacyRulesToPolicyMembers
     ##Apply-AppropriateRules $ComputerIDarray $minseverity $DropAppTypes
     ##Modify Policy Description with updated datetime when script ran.  Maybe check for pointer and only keep last 2 runs
     }
+
 $apptypeids = Get-IpsAppTypeIDs $dropapptypes
+$ipsruleswithbannedapptypes = Get-RuleIDsfromapptypes -apptypeids $apptypeids
+$ipsruletable = Update-IPSruletable -ruletable $ipsruletable -rulestoadd $ipsruleswithbannedapptypes
+
+   
 write-host "Function returned $apptypeids"
 Apply-LegacyRulesToPolicyMembers -apptypeIDs $apptypeids -csvfile $csvfile
-
