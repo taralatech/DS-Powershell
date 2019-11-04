@@ -7,7 +7,7 @@ todo:
 *As each computers rule assignments are checked for severtiy and application type, add to global list of IPS rules if not already present.
  Check each rule for severity.  Store results in hashtable that includes severity and whether it matches a "banned" application type.
  Use hasbtable to lookup severity when filtering rules per computer rather than doing API call.
- check lines 308, 309 and 407 for progress
+ check line 242 for progress
 
 #>
 param (
@@ -145,52 +145,112 @@ Function Get-RuleIDsfromapptypes
 Function Remove-ClientAndBelowSeverityrules
     {
     #Function takes in an Array of Rules recommended to assign, assigned, recommended to unassign, Application type ID's and Minimum severity.
-    #It returns acustom object where $_.Rulestoassign is all rules that need to be added.  i.e. what was recommended to assign minus rules below threshold/with app types listed
-    # $_.Rulestoremove returns bults to unassign plus the assigned rules that are below threshold and match the IPS aaplication types.
     Param
         (
-        [Parameter(mandatory=$true)]
+        [Parameter(mandatory=$false)]
+        [AllowEmptyCollection()]
         [int32[]]$recotoassign,
         [Parameter(mandatory=$true)]
+        [AllowEmptyCollection()]
         [int32[]]$assigned,
         [Parameter(mandatory=$true)]
+        [AllowEmptyCollection()]
         [int32[]]$recotounassign,
         [Parameter(mandatory=$true)]
+        [AllowEmptyCollection()]
         [hashtable]$ipsruletable,
         [Parameter(mandatory=$true)]
-        [string]$minseverity
+        [string]$minseverity,
+        [Parameter(mandatory=$true)]
+        [int32]$computerID
         )
 
     BEGIN
         {
-        if($minseverity = "Low")
+        if($minseverity = "low")
             {
-            $acceptableseverity = "Low" , "Medium" , "High" , "Critical"
+            $acceptableseverity = "low" , "medium" , "high" , "critical"
             }
-        elseif($minseverity = "Medium")
+        elseif($minseverity = "medium")
             {
-            $acceptableseverity = "Medium" , "High" , "Critical"
+            $acceptableseverity = "medium" , "high" , "critical"
             }
-        elseif($minseverity = "High")
+        elseif($minseverity = "high")
             {
-            $acceptableseverity = "High" , "Critical"
+            $acceptableseverity = "high" , "critical"
             }
-       elseif($minseverity = "Critical")
+       elseif($minseverity = "critical")
             {
-            $acceptableseverity = "Critical"
+            $acceptableseverity = "critical"
             }
+        $rulestoadd = [System.Collections.ArrayList]@()
+        $rulestoremove = [System.Collections.ArrayList]@()
         }
     PROCESS
         {
         #$recotoassign - remove unneeded rules
         ForEach ($ruleid in $recotoassign)
             {
-
+            if ($ipsruletable.ContainsKey($ruleid))
+                {
+                #check rule is not "banned" or below threshold.  If not, add to $rulestoadd
+                $severity = $ipsruletable.$ruleid
+                if (($acceptableseverity | ForEach{$severity.contains($_)}) -contains $true)
+                    {
+                    write-host "Rule ID $ruleid is acceptable on Computer ID $computerid with severity $severity"
+                    Add-Content $logfile "Rule ID $ruleid is acceptable on Computer ID $computerid with severity $severity"
+                    $rulestoadd.Add($ruleid)
+                    }
+                }
+            else
+                {
+                Write-host "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
+                add-content $logfile "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
+                }
             }
+        #assigned - find assigned rules that do not meed threshold and are not from banned app types and add to $rulestoremove
+        ForEach ($ruleid in $assigned)
+            {
+            if ($ipsruletable.ContainsKey($ruleid))
+                {
+                #check rule is "banned" or below threshold.  If so, add to $rulestoremove - test this below code
+                $severity = $ipsruletable.$ruleid
+                if (($acceptableseverity | ForEach{$severity.contains($_)}) -notcontains $true)
+                    {
+                    write-host "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and needs to be removed"
+                    Add-Content $logfile "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and needs to be removed"
+                    $rulestoremove.Add($ruleid)
+                    }
+                else
+                    {
+                    write-host "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and is acceptable"
+                    Add-Content $logfile "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and is acceptable"
+                    $rulestoadd.Add($ruleid)
+                    }
+                }
+            else
+                {
+                Write-host "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
+                add-content $logfile "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
+                }
+            }
+        ForEach ($ruleid in $recotounassign)
+            {
+            $rulestoremove.Add($ruleid)
+            }
+        write-host "Computer ID: $computerID has the following rules to assign: $rulestoadd and the following rules to unassign: $rulestoremove"
+        Add-Content $logfile "Computer ID: $computerID has the following rules to assign: $rulestoadd and the following rules to unassign: $rulestoremove"
         }
     END
         {
-        #return hashtable of int32keys and string values for IPS rule ID's and their severity"
+        #apply only $rulestoadd to the computer on Deep Security"
+#https://dsm.example.com:4119/api/computers/{computerID}/intrusionprevention/assignments
+        $ipsseturi = $DSmanager + "api/computers/" + $computerID + "/intrusionprevention/assignments"
+        $json = @{
+                "ruleIDs" = $rulestoadd
+                 } | ConvertTo-Json
+        $computerruleset = Invoke-RestMethod -Headers $headers -method Put -Uri $ipsseturi -body $json -TimeoutSec $resttimeout
+        Add-Content $logfile "Computer ID: $computerID has been processed.  Rule ID's set are $computerruleset"
         }
     }
 
@@ -205,7 +265,6 @@ Function Update-ComputerDescription
         )
     BEGIN
         {
-        #https://dsm.example.com:4119/api/policies/{policyID}
         $datenow = get-date
         $computerdescription = "Computer IPS rules updated by Assign-LegacyIPSrules on $datenow"
         $json = @{
@@ -378,7 +437,7 @@ Function Apply-LegacyRulesToComputers
             {
             write-host "Foreach start"
             write-host $computerobject.hostname
-            write-host $computerobject.count
+            #write-host $computerobject.count
             Update-ComputerDescription -computerID $computerobject.ID
             $ipsuri = $dsmanager + 'api/computers/' + $computerobject.ID + '/intrusionprevention/assignments'
             $rulesassigned = Invoke-RestMethod -Headers $headers -Uri $ipsuri -TimeoutSec $resttimeout
@@ -396,8 +455,12 @@ Function Apply-LegacyRulesToComputers
             Add-Content $logfile "Fullruleset: $fullruleset"
             write-host $rulenumbersassigned
             #update ips rule table for all rules
-            $rulestochange = Remove-ClientAndBelowSeverityrules -recotoassign $rulestoassign -assigned $rulenumbersassigned -recotounassign $rulestoremove -apptypeids $apptypeids -minseverity $minseverity
-            # $rulestochange | update-ipsruletable#need to create this function
+            #$fullruleset = $rulenumbersassigned + $rulestoassign | where {$rulestoremove -notcontains $_}
+            #$ipsruletable.keys
+            $unknownipsrules = $fullruleset | where {$ipsruletable.keys -notcontains $_}
+            if ($unknownipsrules -ne $null) {$unknownipsruletable = Get-IPSrulesfromDSM -ruleids $unknownipsrules}
+            $ipsruletable = Update-IPSruletable -ruletable $ipsruletable -rulestoadd $unknownipsruletable
+            $rulestochange = Remove-ClientAndBelowSeverityrules -recotoassign $rulestoassign -assigned $rulenumbersassigned -recotounassign $rulestoremove -minseverity $minseverity -computerID $computerobject.ID -ipsruletable $ipsruletable
             # replace-computeripsrules #need to create this function
             }
         }
@@ -487,6 +550,4 @@ $apptypeids = Get-IpsAppTypeIDs $dropapptypes
 $ipsruleswithbannedapptypes = Get-RuleIDsfromapptypes -apptypeids $apptypeids
 $ipsruletable = Update-IPSruletable -ruletable $ipsruletable -rulestoadd $ipsruleswithbannedapptypes
 
-   
-write-host "Function returned $apptypeids"
 Apply-LegacyRulesToPolicyMembers -apptypeIDs $apptypeids -csvfile $csvfile
