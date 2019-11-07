@@ -2,13 +2,6 @@
 Run this script as .\Assign-LegacyIPSrules "secretkey" "<full path to csv file>"
 Example: .\Assign-LegacyIPSrules "31:Aab1254fgjkdfgkhdfg=" "c:\scripts\mycsvfile.csv"
 The script file location is not mandatory.  It can be specified below instead.
-
-todo:
-*As each computers rule assignments are checked for severtiy and application type, add to global list of IPS rules if not already present.
- Check each rule for severity.  Store results in hashtable that includes severity and whether it matches a "banned" application type.
- Use hasbtable to lookup severity when filtering rules per computer rather than doing API call.
- check line 242 for progress
-
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
@@ -71,6 +64,7 @@ Function Get-IPSrulesfromDSM
     END
         {
         return $iruletable
+
         }
     }
  
@@ -92,7 +86,7 @@ Function Update-IPSruletable
             {
             if ($ruletable.ContainsKey($ruletoadd) -ne $true)
                 {
-                $ruletable.Add($ruletoadd,"banned")
+                $ruletable.Add($ruletoadd,($rulestoadd.$ruletoadd))
                 }
             }
         }
@@ -134,11 +128,13 @@ Function Get-RuleIDsfromapptypes
                     } | ConvertTo-Json 
             $ipsruleobjects = Invoke-RestMethod -Headers $headers -method Post -Uri $apptypesearchuri -body $json -TimeoutSec $resttimeout
             $ipsruleobjects.intrusionPreventionRules | ForEach {$fullipsrulehashtable.Add($_.ID,"banned")}
+
             }
         }
     END
         {
         return $fullipsrulehashtable
+
         }
     }
 
@@ -167,24 +163,26 @@ Function Remove-ClientAndBelowSeverityrules
 
     BEGIN
         {
-        if($minseverity = "low")
+        if($minseverity -eq "low")
             {
             $acceptableseverity = "low" , "medium" , "high" , "critical"
             }
-        elseif($minseverity = "medium")
+        elseif($minseverity -eq "medium")
             {
             $acceptableseverity = "medium" , "high" , "critical"
             }
-        elseif($minseverity = "high")
+        elseif($minseverity -eq "high")
             {
             $acceptableseverity = "high" , "critical"
             }
-       elseif($minseverity = "critical")
+        elseif($minseverity -eq "critical")
             {
             $acceptableseverity = "critical"
             }
         $rulestoadd = [System.Collections.ArrayList]@()
         $rulestoremove = [System.Collections.ArrayList]@()
+        Add-Content $logfile "Acceptible severity array: $acceptableseverity"
+        write-host "Acceptible severity array: $acceptableseverity"
         }
     PROCESS
         {
@@ -197,14 +195,14 @@ Function Remove-ClientAndBelowSeverityrules
                 $severity = $ipsruletable.$ruleid
                 if (($acceptableseverity | ForEach{$severity.contains($_)}) -contains $true)
                     {
-                    write-host "Rule ID $ruleid is acceptable on Computer ID $computerid with severity $severity"
+                    #write-host "Rule ID $ruleid is acceptable on Computer ID $computerid with severity $severity"
                     Add-Content $logfile "Rule ID $ruleid is acceptable on Computer ID $computerid with severity $severity"
                     $rulestoadd.Add($ruleid)
                     }
                 }
             else
                 {
-                Write-host "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
+                #write-host "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
                 add-content $logfile "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
                 }
             }
@@ -217,20 +215,20 @@ Function Remove-ClientAndBelowSeverityrules
                 $severity = $ipsruletable.$ruleid
                 if (($acceptableseverity | ForEach{$severity.contains($_)}) -notcontains $true)
                     {
-                    write-host "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and needs to be removed"
+                    #write-host "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and needs to be removed"
                     Add-Content $logfile "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and needs to be removed"
                     $rulestoremove.Add($ruleid)
                     }
                 else
                     {
-                    write-host "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and is acceptable"
+                    #write-host "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and is acceptable"
                     Add-Content $logfile "Rule ID $ruleid is assigned to Computer ID $computerid with severity $severity and is acceptable"
                     $rulestoadd.Add($ruleid)
                     }
                 }
             else
                 {
-                Write-host "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
+                #write-host "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
                 add-content $logfile "This should not be happening.  The ruleid $ruleid being processed does not exist in the ipsruletable."
                 }
             }
@@ -250,7 +248,9 @@ Function Remove-ClientAndBelowSeverityrules
                 "ruleIDs" = $rulestoadd
                  } | ConvertTo-Json
         $computerruleset = Invoke-RestMethod -Headers $headers -method Put -Uri $ipsseturi -body $json -TimeoutSec $resttimeout
-        Add-Content $logfile "Computer ID: $computerID has been processed.  Rule ID's set are $computerruleset"
+        $appliedrules = $computerruleset.assignedRuleIDs
+        Add-Content $logfile "Computer ID: $computerID has been processed.  Rule ID's set are $appliedrules"
+
         }
     }
 
@@ -328,8 +328,8 @@ Function Get-ComputersByPolicyID
         }
     PROCESS
         {
-        Add-Content $logfile "Procedding Policy: $policyname ID:$policyID"
-        Write-host "Processing Policy ID:$policyID"
+        Add-Content $logfile "Getting computers from Policy: $policyname ID:$policyID"
+        write-host "Getting computers from Policy: $policyname ID:$policyID"
         $json = @{
                   "maxItems" = 1000
                   "searchCriteria" = @{
@@ -345,7 +345,7 @@ Function Get-ComputersByPolicyID
         {
         $computerlist = $computerobjectarray.computers.hostName
         Add-Content $logfile "Computer Object Array: $computerlist"
-        Write-host "Computer Object Array: $computerlist"
+        write-host "Computer Object Array: $computerlist"
         return $computerobjectarray
         }
     }
@@ -361,14 +361,11 @@ Function Get-IpsAppTypeIDs
         )
     BEGIN
         {
-        write-host "Begin"
-        write-host $dropapptypearray
         $apptypesearchuri = $dsmanager + 'api/applicationtypes/search/'
         $apptypeidarray = @()
         }
     PROCESS
         {
-        write-host "Process"
         ForEach ($dropapptype in $dropapptypearray)
             {
             $json = @{
@@ -380,11 +377,11 @@ Function Get-IpsAppTypeIDs
                                         }
                     "sortByObjectID" = "true"
                   } | ConvertTo-Json
-            Write-Host "App type to drop is $dropapptype"
+            #write-host "App type to drop is $dropapptype"
             $apptypeobject = Invoke-RestMethod -Headers $headers -method Post -Uri $apptypesearchuri -body $json -TimeoutSec $resttimeout
                 if ($apptypeobject.applicationTypes.Count -gt 1)
-                    {write-host "more than 1 match"
-                    write-host $apptypeobject.applicationTypes.Count
+                    {#write-host "more than 1 match"
+                    #write-host $apptypeobject.applicationTypes.Count
                     Add-Content $logfile "More than 1 Application Type object returned for search $dropapptype"
                     }
                 else
@@ -399,9 +396,9 @@ Function Get-IpsAppTypeIDs
         }
     END
         {
-        write-host "End"
+        #write-host "End"
         Add-Content $logfile "App Tpye ID list is: $apptypeidarray"
-        write-host "App Type ID list is: $apptypeidarray"
+        #write-host "App Type ID list is: $apptypeidarray"
         return $apptypeidarray
         }
     }
@@ -427,17 +424,16 @@ Function Apply-LegacyRulesToComputers
         )
     BEGIN
         {
+        write-host "Apply-LegacyRulesToComputers"
         write-host $computerlist.computers.hostname
-        write-host $computerlist.computers.count
-
+        write-host "minseverity variable $minseverity"
         }
     PROCESS
         {
         ForEach ($computerobject in $computerlist.computers)
             {
-            write-host "Foreach start"
-            write-host $computerobject.hostname
-            #write-host $computerobject.count
+            write-host "Foreach start Apply-LegacyRulesToComputers"
+            $hostname = $computerobject.hostname
             Update-ComputerDescription -computerID $computerobject.ID
             $ipsuri = $dsmanager + 'api/computers/' + $computerobject.ID + '/intrusionprevention/assignments'
             $rulesassigned = Invoke-RestMethod -Headers $headers -Uri $ipsuri -TimeoutSec $resttimeout
@@ -453,7 +449,7 @@ Function Apply-LegacyRulesToComputers
             Add-Content $logfile "Rules Recommended to remove from computer: $rulestoremove"
             $fullruleset = $rulenumbersassigned + $rulestoassign | where {$rulestoremove -notcontains $_}
             Add-Content $logfile "Fullruleset: $fullruleset"
-            write-host $rulenumbersassigned
+            write-host "Full list of rules assigned $rulenumbersassigned"
             #update ips rule table for all rules
             #$fullruleset = $rulenumbersassigned + $rulestoassign | where {$rulestoremove -notcontains $_}
             #$ipsruletable.keys
@@ -461,7 +457,6 @@ Function Apply-LegacyRulesToComputers
             if ($unknownipsrules -ne $null) {$unknownipsruletable = Get-IPSrulesfromDSM -ruleids $unknownipsrules}
             $ipsruletable = Update-IPSruletable -ruletable $ipsruletable -rulestoadd $unknownipsruletable
             $rulestochange = Remove-ClientAndBelowSeverityrules -recotoassign $rulestoassign -assigned $rulenumbersassigned -recotounassign $rulestoremove -minseverity $minseverity -computerID $computerobject.ID -ipsruletable $ipsruletable
-            # replace-computeripsrules #need to create this function
             }
         }
     END
@@ -499,6 +494,7 @@ Function Apply-LegacyRulesToPolicyMembers
         ForEach ($policynameID in $policylist)
             {
             $minseverity = $policynameID.MinSeverity
+            write-host "Min severity for policy: $minseverity"
             if ($policynameID.PolicyIDYes -eq 0)
                 {
                 $policyname = $policynameID.PolicynameID
@@ -512,23 +508,24 @@ Function Apply-LegacyRulesToPolicyMembers
                         "sortByObjectID" = "true"
                         } | ConvertTo-Json 
                  $policyobject = Invoke-RestMethod -Headers $headers -method Post -Uri $policysearchuri -body $json -TimeoutSec $resttimeout
+                 Add-Content $logfile "Searching Policies for Policy $policynameID"
                  if ($policyobject.policies.count -gt 1)
                     {
                     Add-Content $logfile "Policy Name: $policyname has more than one match.  Skipping"
-                    Write-host "Policy Name: $policyname has more than one match.  Skipping"
+                    write-host "Policy Name: $policyname has more than one match.  Skipping"
                     }
                  Else
                     {
                     $policyID = $policyobject.policies.ID
-                    Add-Content $logfile "Processing Policy: $policyname ID:$policyID"
+                    Add-Content $logfile "Policy name in CSV file. Processing Policy: $policyname ID:$policyID"
                     }
                  }         
             else
                 {
                     $policyID = $policynameID
-                    Add-Content $logfile "Procedding Policy: $policyname ID:$policyID"
+                    Add-Content $logfile "Processing Policy.  Policy from CSV file was an ID: $policyname ID:$policyID"
                 }
-            Write-host "Processing Policy ID:$policyID"
+            write-host "Getting computer list for Policy ID:$policyID"
             $computerobjectarray  = Get-ComputersByPolicyID -policyID $policyID
             Update-PolicyDescription -policyID $policyID
             Apply-LegacyRulesToComputers -computerlist $computerobjectarray -apptypeids $apptypeids -minseverity $minseverity
@@ -538,16 +535,9 @@ Function Apply-LegacyRulesToPolicyMembers
         {
 
         }
-
-    #Load CSV
-    #For Each line
-    ##retrieve array of computer ID's to which the policy applies
-    ##Apply-AppropriateRules $ComputerIDarray $minseverity $DropAppTypes
-    ##Modify Policy Description with updated datetime when script ran.  Maybe check for pointer and only keep last 2 runs
     }
 
 $apptypeids = Get-IpsAppTypeIDs $dropapptypes
 $ipsruleswithbannedapptypes = Get-RuleIDsfromapptypes -apptypeids $apptypeids
 $ipsruletable = Update-IPSruletable -ruletable $ipsruletable -rulestoadd $ipsruleswithbannedapptypes
-
 Apply-LegacyRulesToPolicyMembers -apptypeIDs $apptypeids -csvfile $csvfile
