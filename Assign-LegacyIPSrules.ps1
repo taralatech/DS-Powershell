@@ -1,11 +1,14 @@
 ﻿<#
-Run this script as .\Assign-LegacyIPSrules "secretkey" "<full path to csv file>"
+Run this script as .\Assign-LegacyIPSrules "secretkey" "<full path to csv file>" "<DS manager URL>" "<logfilepath>"
+Note that everythnig but the secret key can be specified within the script instead and so is not mandatory.
 Example: .\Assign-LegacyIPSrules "31:Aab1254fgjkdfgkhdfg=" "c:\scripts\mycsvfile.csv"
 The script file location is not mandatory.  It can be specified below instead.
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
-    [Parameter(Mandatory=$true)][string]$csvfile
+    [Parameter(Mandatory=$false)][string]$csvfile,
+    [Parameter(Mandatory=$false)][string]$dsmanager,
+    [Parameter(Mandatory=$false)][string]$logfilepath
 )
 
 #Alternatively enter the csv file location here
@@ -20,6 +23,12 @@ $dsmanager = "https://app.deepsecurity.trendmicro.com/"
 $date = ( get-date ).ToString('yyyyMMddhhmmss')
 $logfile = New-Item -type file "$logfilepath\Assign-LegacyIPSrules-$date.txt"
 $dropapptypes = "Web Client Common", "Web Client Internet Explorer/Edge", "Web Client Mozilla Firefox", "Microsoft Office"
+if ($csvfile -eq "")
+    {
+    Add-Content $logfile "CSV file not specified within script or as a parameter.  Either run the script as Assign-LegacyIPSrules secretkey <full path to csv file>"
+    Add-Content $logfile "Or specify the CSV location within the script"
+    throw "CSV file not specified within script or as a parameter"
+    }
 $ipsruletable = @{}
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -476,6 +485,7 @@ Function Apply-LegacyRulesToPolicyMembers
     #Function takes in an Array of Application Type ID's and the csv file and for each line in the CSV:
     #gets a list of computers to which the policy applies
     #Runs the function Apply-LegacyRulesToComputers to apply recommended IPS rules minus the ones that match application types or are below minseverity..
+    #Updates policy description
     [CmdletBinding()]
     Param
         (
