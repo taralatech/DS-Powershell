@@ -286,3 +286,17 @@ Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'loginspectionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'intrusionpreventionrules'
+<#
+Missing:
+applicationTypeIDs
+antiMalwareSettingScanCacheRealTimeConfigId"
+"applicationControlSettingSyslogConfigId"
+SyslogConfigId
+"webReputationSettingSmartProtectionWebReputationGlobalServerProxyId"
+platformSettingSmartProtectionAntiMalwareGlobalServerProxyId
+"logInspectionSettingSyslogConfigId"
+applicationControlSettingSharedRulesetId
+antiMalwareSettingScanCacheOnDemandConfigId
+Inheritance seems to be missing from policies even though it is set and according to the reference, should be working
+can use https://{{dsm-address}}/api/policies/25?overrides=true to only display overrides
+#>
