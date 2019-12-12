@@ -123,6 +123,12 @@ function compare-andcreatedsobject
                 $importobject.name = $prefix + "_" + $importobject.name
                 $body = $importobject | convertto-json
                 $dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+                if (! $dsobject)
+                    {
+                    write-host "Error for Object $uripart " $importobject.name -ForegroundColor Red -BackgroundColor Black
+                    $logcontent = "Error for Object $uripart " + $importobject.name
+                    Add-Content $logfile $logcontent
+                    }
                 $newID = $dsobject.ID
                 write-host "New Object created - Name: "$importobject.name "Object ID: $newID" -ForegroundColor Cyan
                 $logcontent = "New Object created - Name: " + $importobject.name + "Object ID: $newID"
