@@ -68,6 +68,80 @@ function Get-DSfilelist
         }
     }
 
+function compare-andcreatedsobject
+    {
+    #compare $importobject to $newdsmobject - if they are the same, return only the new DSM object ID.
+    #If they are different, create a new object with the prefix and return the new object ID
+    [CmdletBinding()]
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [pscustomobject]$importobject,
+        [Parameter(mandatory=$true)]
+        [pscustomobject]$newdsmobject,
+        [Parameter(mandatory=$true)]
+        [string]$uripart,
+        [Parameter(mandatory=$true)]
+        [string]$prefix
+        )
+    PROCESS
+        {
+        $newID = $newdsmobject.ID
+        $newdsmobject.psobject.Properties.Remove('ID')
+        $diffoutput = Compare-Object -DifferenceObject $newdsmobject -ReferenceObject $importobject
+        if ($diffoutput)
+            {
+            #Objects do not have the same properties - this should never happen
+            write-host "Something is very wrong.  Objects to be compared have different properties. New Object ID: $newID Imported Object name:" $importobject.name -ForegroundColor Red
+            $logcontent = "ERROR: Something is very wrong.  Objects to be compared have different properties. New Object ID: $newID Imported Object name:" + $importobject.name
+            Add-Content $logfile $logcontent
+            }
+        else
+            {
+            #We know that all of the properties are the same.  Loop through the values comparing.  Set $identical to $false if any properties differ.
+            $objproperties = $newdsmobject.psobject.Properties.Name
+            $identical = $true
+            ForEach ($objproperty in $objproperties)
+                {
+                $propcompare = Compare-Object -ReferenceObject $importobject -DifferenceObject $newdsmobject -Property $objproperty
+                if ($propcompare)
+                    {
+                    write-host "Properties $objproperty Differ. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor Cyan
+                    $logcontent = "Properties $objproperty Differ. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
+                    Add-Content $logfile $logcontent
+                    $identical = $false
+                    }
+                else
+                    {
+                    write-host "Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor Green
+                    $logcontent = "Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
+                    Add-Content $logfile $logcontent
+                    }
+                }
+            if ($identical -eq $false)
+                {
+                $importobject.name = $prefix + "_" + $importobject.name
+                $body = $importobject | convertto-json
+                $dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+                $newID = $dsobject.ID
+                write-host "New Object created - Name: "$importobject.name "Object ID: $newID" -ForegroundColor Cyan
+                $logcontent = "New Object created - Name: " + $importobject.name + "Object ID: $newID"
+                Add-Content $logfile $logcontent
+                }
+            else
+                {
+                write-host "Obects are identical.  Make no changes and return existing object ID - Name: "$importobject.name "Object ID: $newID" -ForegroundColor Green
+                $logcontent = "Obects are identical.  Make no changes and return existing object ID - Name: " + $importobject.name + "Object ID: $newID"
+                Add-Content $logfile $logcontent
+                }
+            }
+        }
+    END
+        {
+        return $newID
+        }
+    }
+
 function Add-Dsobjects
 	{
     [CmdletBinding()]
@@ -119,11 +193,14 @@ function Add-Dsobjects
                 if ($searchobject.$uripart.Count -eq 1)
                     {
                     write-host "Duplicate name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID
-                    $logcontent = "Duplicate name $uripart " + $psobjectfromjson.name + "ID of dupe:" + $searchobject.$uripart.ID
+                    $logcontent = "Duplicate name $uripart " + $psobjectfromjson.name + " ID of dupe:" + $searchobject.$uripart.ID
                     Add-Content $logfile "$logcontent"
-                    $psobjectfromjson.name = $prefix + "_" + $psobjectfromjson.name
-                    $body = $psobjectfromjson | convertto-json
-                    $dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+                    #New function here - compare objects - if the same, output just the new object ID.  If different, create new object with prefix and output new object ID
+                    #Input is imported object and object from API.  Output is Object ID of unmodified/new object.
+                    #This is bad.  I know but I couldn't get the array returned as a property of the pscustomobject returned into a pscustomobject with less code.
+                    $newdsmjson =  $searchobject.$uripart | Convertto-Json
+                    $newdsmpsobject = $newdsmjson | convertfrom-json
+                    $newID = compare-andcreatedsobject $psobjectfromjson $newdsmpsobject $uripart $prefix
                     $newID = $dsobject.ID
                     }
                 else
@@ -149,10 +226,26 @@ function Add-Dsobjects
 
 
 #Main body
-$dsimportobjects = get-dsfilelist $inputdir directorylists
-$idmappings = add-dsobjects directorylists $dsimportobjects $prefix  1
-$masteridmappings | Add-Member -NotePropertyName directorylists -NotePropertyValue $idmappings
+#Level One - Import objects with no links to other objects
+$loneobjects = @('directorylists','contexts','fileextensionlists','filelists','iplists','maclists','portlists','schedules','statefulconfigurations')
 
-$dsimportobjects = get-dsfilelist $inputdir contexts
-$idmappings = add-dsobjects contexts $dsimportobjects $prefix  1
-$masteridmappings | Add-Member -NotePropertyName contexts -NotePropertyValue $idmappings
+ForEach ($uripart in $loneobjects)
+    {
+    $dsimportobjects = get-dsfilelist $inputdir $uripart
+    if ($dsimportobjects)
+        {
+        $idmappings = add-dsobjects $uripart $dsimportobjects $prefix  1
+        }
+    else
+        {
+        write-host "Empty Directory for $uripart" -ForegroundColor Yellow
+        Add-Content $logfile "Empty Directory for $uripart"
+        }
+    $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
+    }
+
+#Level 2 - Import objects with dependencies to only level One objects
+
+#level 3 - Import rules.  Filter "out of the box" rules out and only map them.  Optional: compare "out of box rules" and report if they are different.  Do not add them to the new DSM
+
+#Level 4 - Import the policies
