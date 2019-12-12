@@ -86,7 +86,7 @@ function compare-andcreatedsobject
         )
     PROCESS
         {
-        $newID = $newdsmobject.ID
+        $newID = $newdsmobject.ID.psobject.Copy()
         $newdsmobject.psobject.Properties.Remove('ID')
         $diffoutput = Compare-Object -DifferenceObject $newdsmobject -ReferenceObject $importobject
         if ($diffoutput)
@@ -104,7 +104,7 @@ function compare-andcreatedsobject
             ForEach ($objproperty in $objproperties)
                 {
                 $propcompare = Compare-Object -ReferenceObject $importobject -DifferenceObject $newdsmobject -Property $objproperty
-                if ($propcompare)
+                if (($propcompare) -and ($objproperty -ne 'originalIssue') -and ($objproperty -ne 'lastUpdated'))
                     {
                     write-host "Properties $objproperty Differ. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor Cyan
                     $logcontent = "Properties $objproperty Differ. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
@@ -207,7 +207,7 @@ function Add-Dsobjects
                     $newdsmjson =  $searchobject.$uripart | Convertto-Json
                     $newdsmpsobject = $newdsmjson | convertfrom-json
                     $newID = compare-andcreatedsobject $psobjectfromjson $newdsmpsobject $uripart $prefix
-                    $newID = $dsobject.ID
+                    #$newID = $dsobject.ID
                     }
                 else
                     {
@@ -215,7 +215,9 @@ function Add-Dsobjects
                     $dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
                     $newID = $dsobject.ID
                     }
-                $IDmappings.Add($originalid,$newID)
+                    write-host "OriginalID "$originalid
+                    write-host "New ID" $newID
+                $IDmappings.Add($originalid.ToString(),$newID.ToString())
                 }
             else
                 {
@@ -252,6 +254,16 @@ ForEach ($uripart in $loneobjects)
 
 #Level 2 - Import objects with dependencies to only level One objects
 
-#level 3 - Import rules.  Filter "out of the box" rules out and only map them.  Optional: compare "out of box rules" and report if they are different.  Do not add them to the new DSM
+#Firewall rules (port lists, ip lists, mac lists)
+#IPS application types (port lists)
+
+#level 3 - Import rules.
+
+#Ips Rules (ips application types)
 
 #Level 4 - Import the policies
+
+#save the mapping table to disk
+$savejson = $masteridmappings | ConvertTo-Json
+$savejsonfile = New-Item -type file "$logfilepath\Output-DSPolicies-$date.json"
+Add-Content $savejsonfile $savejson
