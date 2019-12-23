@@ -45,7 +45,15 @@ Function Get-DSConfigObject
         )
     BEGIN
         {
-        $dsobjuri = $dsmanager + 'api/' + $uripart + '/' + $objid
+        if ($uripart -eq 'policies')
+            {
+            $dsobjuri = $dsmanager + 'api/' + $uripart + '/' + $objid + '?overrides=true'
+            write-host "Object is a policy - requesting overrides only"
+            }
+        else
+            {
+            $dsobjuri = $dsmanager + 'api/' + $uripart + '/' + $objid
+            }
         write-host "Beginning fetch for Object ID $objid" -ForegroundColor Gray
         }
     PROCESS
@@ -235,6 +243,7 @@ Function Export-AllDSobjectsOfType
             write-host "$description saved to disk (export-alldsobjectsoftype)"  -ForegroundColor Cyan
             write-host "Object ID is: $idnumber2 "  -ForegroundColor Cyan
             write-host "-------------------------------------------------------------------"  -ForegroundColor Cyan
+            Add-Content $logfile "$description saved to disk.  $uripart $idnumber2"
             }
         }
     END
@@ -285,10 +294,11 @@ Export-AllDSobjectsOfType 'integritymonitoringrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'loginspectionrules'
 Start-Sleep $backoffdelay
-Export-AllDSobjectsOfType 'intrusionpreventionrules'
+#Export-AllDSobjectsOfType 'intrusionpreventionrules'
+Start-Sleep $backoffdelay
+Export-AllDSobjectsOfType 'applicationtypes'
 <#
 Missing:
-applicationTypeIDs
 antiMalwareSettingScanCacheRealTimeConfigId"
 "applicationControlSettingSyslogConfigId"
 SyslogConfigId
@@ -297,6 +307,4 @@ platformSettingSmartProtectionAntiMalwareGlobalServerProxyId
 "logInspectionSettingSyslogConfigId"
 applicationControlSettingSharedRulesetId
 antiMalwareSettingScanCacheOnDemandConfigId
-Inheritance seems to be missing from policies even though it is set and according to the reference, should be working
-can use https://{{dsm-address}}/api/policies/25?overrides=true to only display overrides
 #>
