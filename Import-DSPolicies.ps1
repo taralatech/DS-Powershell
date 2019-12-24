@@ -4,7 +4,6 @@ $masteridmappings.$uripart.Item($number)
 gets the value for the key.  using $masteridmappings.$uripart.number doesn't work for first item.
 test: $masteridmappings.$uripart.'number'
 
-To test: IPS rules - uncomment the array for IPS rules on line 402
 
 #>
 param (
