@@ -4,33 +4,7 @@ $masteridmappings.$uripart.Item($number)
 gets the value for the key.  using $masteridmappings.$uripart.number doesn't work for first item.
 test: $masteridmappings.$uripart.'number'
 
-work is on line 127 for l2 objects.
-need to create finction create-newdmsobject $importobject $uripart $prefix $level $duplicate
-lookup table can be a single table for all properties ragardless of object type
-Firewall:
-sourceIPListID = iplists
-sourceMACListID = maclists
-sourcePortListID = portlists
-destinationIPListID = iplists
-destinationMACListID = maclists
-destinationPortListID = portlists
-IPS app types:
-portListID = portlists
-IPS Rules:
-applicationTypeID = applicationtypes
-schedule
-context
-Policies:
-$lookuptable = @{
-"sourceIPListID" = "iplists"
-"sourceMACListID" = "maclists"
-"sourcePortListID" = "portlists"
-"destinationIPListID" = "iplists"
-"destinationMACListID" = "maclists"
-"destinationPortListID" = "portlists"
-"portListID" = "portlists"
-"applicationTypeID" = "applicationtypes"
-}
+To test: IPS rules - uncomment the array for IPS rules on line 402
 
 #>
 param (
@@ -38,7 +12,8 @@ param (
     [Parameter(Mandatory=$false)][string]$inputdir,
     [Parameter(Mandatory=$false)][string]$dsmanager,
     [Parameter(Mandatory=$false)][string]$logfilepath,
-    [Parameter(Mandatory=$false)][string]$prefix
+    [Parameter(Mandatory=$false)][string]$prefix,
+    [Parameter(Mandatory=$false)][string]$loadfile
 )
 
 
@@ -74,8 +49,10 @@ $lookuptable = @{
 "excludedFileExtensionListID" = "fileextensionlists"
 "excludedProcessImageFileListID" = "filelists"
 "applicationTypeID" = "applicationtypes"
+"contextID" = "contexts"
+"scheduleID" = "schedules"
 }
-
+$global:irreconcilabledifferences = @{}
 
 #Create a PScustomObject to store the Object ID mappings
 $masteridmappings = [PSCustomObject]@{}
@@ -96,6 +73,127 @@ $headers = @{
 Add-Content $logfile "Import of DS Policies started - DS manager URL - $DSmanager"
 
 #Functions
+
+function Call-Dsapi
+    {
+param (
+    [Parameter(Mandatory=$true)][hashtable]$headers,
+    [Parameter(Mandatory=$true)][string]$method,
+    [Parameter(Mandatory=$true)][string]$uri,
+    [Parameter(Mandatory=$false)][string]$body,
+    [Parameter(Mandatory=$true)][int32]$resttimeout,
+    [Parameter(Mandatory=$true)][int32]$backoffdelay
+    )
+    BEGIN
+        {
+        #check that the request is formatted properly
+        $alloweddmethods = @('get','post','delete')
+        if ($method -notin $alloweddmethods)
+            {
+            throw "Method Specified does not match get, post or delete"
+            }
+        if (($method -eq "post") -and ($body -eq $null))
+            {
+            throw "Method is post but no body present"
+            }
+        }
+    PROCESS
+        {
+        $count = 1
+        switch ($method)
+            {
+            "get"
+                {
+                $dsobject = Invoke-RestMethod -Headers $headers -method Get -Uri $uri -TimeoutSec $resttimeout
+                if ($dsobject)
+                    {
+                    Write-Host "ID: $uri Connected! Call-Dsapi" -Foregroundcolor Green
+                    }
+                else
+                    {
+                    Write-Host "ID: $uri Error! Assume API overload for Call-Dsapi" -ForegroundColor Yellow
+                    do
+                        {
+                        Start-Sleep -Seconds $backoffdelay
+                        $dsobject = Invoke-RestMethod -Headers $headers -method Get -Uri $uri -TimeoutSec $resttimeout
+                        $count ++
+                        }
+                    while ((-Not $dsobject) -and ($count -lt 50))
+                    write-host "Call-Dsapi Error handling complete - URI is: $uri" -ForegroundColor Yellow
+                    if (! $dsobject)
+                        {
+                        write-host "Count: $count" -ForegroundColor DarkRed
+                        write-host "Headers: $headers" -ForegroundColor DarkRed
+                        write-host "Method: Get" -ForegroundColor DarkRed
+                        write-host "URI: $uri" -ForegroundColor DarkRed                     
+                        throw "API still failing after 50 attempts"
+                        }
+                    }
+                }
+            "post"
+                {
+                $dsobject = Invoke-RestMethod -Headers $headers -method Post -Uri $uri -body $body -TimeoutSec $resttimeout
+                if ($dsobject)
+                    {
+                    Write-Host "ID: $uri Connected! Call-Dsapi" -Foregroundcolor Green
+                    }
+                else
+                    {
+                    Write-Host "ID: $uri Error! Assume API overload for Call-Dsapi" -ForegroundColor Yellow
+                    do
+                        {
+                        Start-Sleep -Seconds $backoffdelay
+                        $dsobject = Invoke-RestMethod -Headers $headers -method Post -Uri $uri -body $body -TimeoutSec $resttimeout
+                        $count ++
+                        }
+                    while ((-Not $dsobject) -and ($count -lt 50))
+                    write-host "Call-Dsapi Error handling complete - URI is: $uri" -ForegroundColor Yellow
+                    if (! $dsobject)
+                        {
+                        write-host "Count: $count" -ForegroundColor DarkRed
+                        write-host "Headers: $headers" -ForegroundColor DarkRed
+                        write-host "Method: Post" -ForegroundColor DarkRed
+                        write-host "URI: $uri" -ForegroundColor DarkRed
+                        write-host "Body: $body" -ForegroundColor DarkRed
+                        throw "API still failing after 50 attempts"
+                        }
+                    }
+                }
+            "delete"
+                {
+                write-host "Not used this yet" -ForegroundColor Yellow
+                throw "Sorry this bit isn't ready"
+                <#
+                $dsobject = Invoke-RestMethod -Headers $headers -method Delete -Uri $uri -TimeoutSec $resttimeout
+                if ($dsobject)
+                    {
+                    Write-Host "ID: $uri Connected! Call-Dsapi" -Foregroundcolor Green
+                    }
+                else
+                    {
+                    Write-Host "ID: $uri Error! Assume API overload for Call-Dsapi" -ForegroundColor Yellow
+                    do
+                        {
+                        Start-Sleep -Seconds $backoffdelay
+                        $dsobject = Invoke-RestMethod -Headers $headers -method Delete -Uri $uri -TimeoutSec $resttimeout
+                        $count ++
+                        }
+                    while ((-Not $dsobject) -and ($count -lt 50))
+                    write-host "Call-Dsapi Error handling complete - URI is: $uri" -ForegroundColor Yellow
+                    if (! $dsobject) {throw "API still failing after 50 attempts"}
+                    }
+                #>
+                }
+            Default
+                {throw "Method Specified does not match get, post or delete"}
+            }
+        }
+    END
+        {
+        return $dsobject
+        }
+    }
+
 function Get-DSfilelist
     {
     [CmdletBinding()]
@@ -118,8 +216,8 @@ function Get-DSfilelist
         }
     END
         {
-        Add-Content $logfile "Output list - $childobjects"
-        write-host "Output list - $childobjects"
+        #Add-Content $logfile "Output list - $childobjects"
+        #write-host "Output list - $childobjects"
         return $childobjects
         }
     }
@@ -160,7 +258,8 @@ function compare-andcreatedsobject
             $logcontent = "DUPLICATE_DIFFER:  Objects to be compared have different properties. New Object ID: $newID Imported Object name:" + $importobject.name
             Add-Content $logfile $logcontent
             $duplicate = $true
-            create-newdmsobject $importobject $uripart $prefix $level $duplicate
+            create-newdsmobject $importobject $uripart $prefix $level $duplicate
+            throw "create-newdsmobject not created yet.  Perhaps its not needed"
             }
         else
             {
@@ -170,17 +269,16 @@ function compare-andcreatedsobject
             ForEach ($objproperty in $objproperties)
                 {
                 $propcompare = Compare-Object -ReferenceObject $importobject -DifferenceObject $newdsmobject -Property $objproperty
-                if ((($propcompare) -and ($objproperty -ne 'originalIssue') -and ($objproperty -ne 'lastUpdated')-and ($objproperty -ne 'description') -and $level -eq 1))
+                if ((($propcompare) -and ($objproperty -ne 'originalIssue') -and ($objproperty -ne 'lastUpdated') -and ($objproperty -ne 'description') -and $level -eq 1))
                     {
                     write-host "Properties $objproperty Differ. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor Cyan
                     $logcontent = "DUPLICATE_DIFFER: Properties $objproperty Differ. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
                     Add-Content $logfile $logcontent
                     $identical = $false
                     }
-                elseif ($level -eq 2)
+                elseif (($level -eq 2) -or ($level -eq 3))
                     {
-                    
-                    write-host "objproperty is $objproperty , "
+                    #write-host "objproperty is $objproperty , "
                     #lookup $objproperty in lookuptable
                     #if entry exists,
                         #lookup ID in $masteridmappings (convert to/from strings - check whether int32 or string for entries)
@@ -189,26 +287,50 @@ function compare-andcreatedsobject
                     if ($lookuptable.$objproperty)
                         {
                         #ID looked ip form the table - to compare to what's been pulled from the dsm
+                        #$oldidconverted has the value of what the list ID should be if the list is the same.  i.e. $oldidconverted should match the list ID of the object currently
+                        #on the DSM if tehy are identical.  If not, they are different lists.
                         $oldidconverted = $masteridmappings.($lookuptable.$objproperty).($importobject.$objproperty.ToString())
-                        $newid = $importobject.$objproperty.ToString()
-                        if ($oldidconverted -ne $newid)
+                        #this is not needed - it's a false comparison.  Need to get the list ID from the current DSM object to compare. $newdsmobject is the object imported
+                        #from the new dsm
+                        #$newlistid = $importobject.$objproperty.ToString()
+                        $newlistid = $newdsmobject.$objproperty.ToString()
+                        $importeditemid = $importobject.$objproperty #just for confirming logic is fixed
+                        #write-host "newlistid = $newlistid"
+                        #write-host "oldidconverted = $oldidconverted"
+                        #write-host "importeditemid = $importeditemid"
+                        if ($oldidconverted -ne $newlistid)
                             {
                             #properties differ - create new object by setting $identical to $false
                             #then change the list ID on the object to be created to match the new list
                             $correctid = $oldidconverted/1 #Convert from string to Int32
                             $importobject.$objproperty = $correctid
-                            $identical = $false
-                            $logcontent = "DUPLICATE_DIFFER: Property is a list and the lists are have different contents. Imported Object ID: " + $newid + ", changed to " + $correctid
+                            if ($level -eq 2) {$identical = $false}
+                            #write-host "newid = $newid"
+                            $logcontent = "DUPLICATE_DIFFER: Property $objproperty is a list and the lists are have different contents. Imported Object ID: " + $newid + ", changed to " + $correctid
                             Add-Content $logfile $logcontent
-                            write-host "Property is a list and the lists have different contents.  Imported Object ID: $newid , changed to $correctid" -ForegroundColor Cyan
+                            write-host "Property $objproperty is a list and the lists have different contents.  Imported Object ID: $newid , changed to $correctid" -ForegroundColor Cyan
+                            if ($level -eq 3)
+                                {
+                                write-host "Rule has a differing list property but is an IPS rule.  These cannot be created unless they are a custom rule"
+                                #check for property: template - if it exists, it is a custom rule and can be created.
+                                if ($importobject.template)
+                                    {$identical = $false}
+                                else
+                                    {
+                                    write-host "Property cannot be set $objproperty" -ForegroundColor Yellow 
+                                    $global:irreconcilabledifferences.add($newdsmobject.Name,$objproperty)
+
+                                    }
+                                }
                             }
                         else
                             {
-                            write-host "Property is a list and the lists are identical - ID $newid" -ForegroundColor Green
-                            Add-Content $logfile "DUPLICATE_IDENTICAL: Property is a list and the lists are identical - ID $newid"
+                            #write-host "Property $objproperty is a list and the lists are identical - ID $newid" -ForegroundColor Green
+                            #Add-Content $logfile "DUPLICATE_IDENTICAL: Property $objproperty is a list and the lists are identical - ID $newid"
                             }
                         }
-                    elseif (($propcompare) -and ($objproperty -ne 'originalIssue') -and ($objproperty -ne 'lastUpdated') -and ($objproperty -ne 'description'))
+                    elseif (($propcompare) -and ($objproperty -ne 'originalIssue') -and ($objproperty -ne 'lastUpdated') -and ($objproperty -ne 'description')`
+                     -and ($objproperty -ne 'dependsOnRuleIDs') -and ($objproperty -ne 'CVE') -and ($objproperty -ne 'CVSSScore'))
                         {
                         $logcontent = "DUPLICATE_DIFFER: Properties $objproperty Differ. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
                         Add-Content $logfile $logcontent
@@ -216,24 +338,65 @@ function compare-andcreatedsobject
                         }
                     else
                         {
-                        write-host "L2 Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor Green
-                        $logcontent = "DUPLICATE_IDENTICAL: L2 Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
-                        Add-Content $logfile $logcontent
+                        if ($objproperty -eq 'dependsOnRuleIDs')
+                            {
+                            write-host "L3 Property is dependsOnRuleIDs Skipping tests. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor yellow
+                            $logcontent = "DUPLICATE_SKIPPED: L Property s dependsOnRuleIDs Skipping tests. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
+                            Add-Content $logfile $logcontent
+                            $global:irreconcilabledifferences.add($newdsmobject.Name,$objproperty)
+                            }
+                        else
+                            {
+                            #write-host "L2 Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor Green
+                            #$logcontent = "DUPLICATE_IDENTICAL: L2 Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
+                            #Add-Content $logfile $logcontent
+                            }
+                        
                         }
                     #note that the above covers all l2 situations (property has an entry, property is different but no entry and property is the same but has no entry
                     }
                 else
                     {
                     #write-host "Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" $importobject.name -ForegroundColor Green
-                    $logcontent = "DUPLICATE_IDENTICAL: Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
-                    Add-Content $logfile $logcontent
+                    #$logcontent = "DUPLICATE_IDENTICAL: Properties $objproperty are identical. New DSM Object ID: $newID, Imported Object Name:" + $importobject.name
+                    #Add-Content $logfile $logcontent
                     }
                 }
             if ($identical -eq $false)
                 {
                 $importobject.name = $prefix + "_" + $importobject.name
+                $searchjsonname = $importobject.name
+                #
+                $searchjson = @{
+                            "maxItems" = 1
+                            "searchCriteria" = @{
+                                                "fieldName" = "name"
+                                                "stringTest" = "equal"
+                                                "stringValue" = "%$searchjsonname%"
+                                                }
+                            "sortByObjectID" = "true"
+                          } | ConvertTo-Json
+                $dssearchuri = $dsobjuri + "/search"
+                #
                 $body = $importobject | convertto-json
-                $dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+
+                if ($level -eq 3)
+                    {
+                    #breakpoint
+                    }
+                $searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay
+                if ($searchobject.$uripart.Count -ne 0)
+                    {
+                    $logname = $searchobject.$uripart.name
+                    write-host "Search for object has found the new prefixed object exists - Name: $logname" -ForegroundColor Yellow
+                    $logcontent = "ERROR: Prefixed Object exists. Name is: $logname Assuming it is correct.  If this script has not been run before, there is a problem."
+                    Add-Content $logfile $logcontent
+                    $dsobject = $searchobject.$uripart
+                    }
+                else
+                    {
+                    $dsobject = Call-Dsapi -headers $headers -method Post -Body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
+                    }
                 if (! $dsobject)
                     {
                     write-host "Error for Object $uripart " $importobject.name -ForegroundColor Red -BackgroundColor Black
@@ -315,7 +478,8 @@ function Add-Dsobjects
                                                 }
                             "sortByObjectID" = "true"
                           } | ConvertTo-Json
-                $searchobject =  Invoke-RestMethod -Headers $headers -method Post -Body $searchjson -ContentType 'application/json' -Uri $dssearchuri -TimeoutSec $resttimeout
+                #$searchobject = Invoke-RestMethod -Headers $headers -method Post -Body $searchjson -ContentType 'application/json' -Uri $dssearchuri -TimeoutSec $resttimeout
+                $searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay
                 if ($searchobject.$uripart.Count -eq 1)
                     {
                     write-host "Duplicate name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID
@@ -356,7 +520,8 @@ function Add-Dsobjects
                         }
 
                     $body = $psobjectfromjson | convertto-json
-                    $dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+                    #$dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+                    $dsobject = Call-Dsapi -headers $headers -method Post -body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
                     $newID = $dsobject.ID
                     }
                     write-host "OriginalID "$originalid
@@ -379,7 +544,8 @@ function Add-Dsobjects
 
 #Main body
 #Level One - Import objects with no links to other objects
-$loneobjects = @('directorylists','contexts','fileextensionlists','filelists','iplists','maclists','portlists','schedules','statefulconfigurations')
+#Forget IM, LI and AC for now.
+if (! $loadfile){$loneobjects = @('directorylists','contexts','fileextensionlists','filelists','iplists','maclists','portlists','schedules','statefulconfigurations')}
 
 ForEach ($uripart in $loneobjects)
     {
@@ -400,7 +566,7 @@ ForEach ($uripart in $loneobjects)
 #Firewall rules (port lists, ip lists, mac lists)
 #IPS application types (port lists)
 #AM scan configs (File, extension and directory lists)
-$ltwoobjects = @('firewallrules','applicationtypes','antimalwareconfigurations')
+if (! $loadfile) {$ltwoobjects = @('firewallrules','applicationtypes','antimalwareconfigurations')}
 
 ForEach ($uripart in $ltwoobjects)
     {
@@ -421,12 +587,43 @@ ForEach ($uripart in $ltwoobjects)
 
 
 #level 3 - Import rules.
-
 #Ips Rules (ips application types)
+if (! $loadfile) {$lthreeobjects = @('intrusionpreventionrules')}
+ForEach ($uripart in $lthreeobjects)
+    {
+    $dsimportobjects = get-dsfilelist $inputdir $uripart
+    if ($dsimportobjects)
+        {
+        $idmappings = add-dsobjects $uripart $dsimportobjects $prefix  3
+        }
+    else
+        {
+        write-host "Empty Directory for $uripart" -ForegroundColor Yellow
+        Add-Content $logfile "Empty Directory for $uripart"
+        }
+    $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
+    }
 
+
+if ($loadfile)
+    {
+    $importmappings = $inputdir + "\" + $loadfile
+    $mappingsobject = Get-Content -Raw -Path $importmappings | ConvertFrom-Json
+    }
+else
+    {
+    $mappingsobject = $masteridmappings | ConvertTo-Json | ConvertFrom-Json
+    }
 #Level 4 - Import the policies
 
 #save the mapping table to disk
 $savejson = $masteridmappings | ConvertTo-Json
-$savejsonfile = New-Item -type file "$logfilepath\Output-DSPolicies-$date.json"
+$savejsonfile = New-Item -type file "$logfilepath\Output-DSPolicies-$date-1.json"
 Add-Content $savejsonfile $savejson
+#Write the list of problematic rule imports to disk
+if ($global:irreconcilabledifferences.keys.Count -gt 0)
+    {
+    $difffile = New-Item -type file "$logfilepath\Output-DSPolicies-Failedimports-$date.json"
+    $savediff = $global:irreconcilabledifferences | ConvertTo-Json
+    Add-Content $difffile $savediff
+    }

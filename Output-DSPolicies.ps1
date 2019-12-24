@@ -11,7 +11,7 @@ param (
 #enter the timeout for REST queries here
 $resttimeout = 30
 #Enter the delay in seconds if there are API errors (such as "too many API requests")
-$backoffdelay = 1
+$backoffdelay = 0
 #URL must include HTTPS:// and finish with a /
 #e.g. $DSmanager = "https://app.deepsecurity.trendmicro.com/"
 #$dsmanager = "https://app.deepsecurity.trendmicro.com/"
@@ -294,7 +294,7 @@ Export-AllDSobjectsOfType 'integritymonitoringrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'loginspectionrules'
 Start-Sleep $backoffdelay
-#Export-AllDSobjectsOfType 'intrusionpreventionrules'
+Export-AllDSobjectsOfType 'intrusionpreventionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'applicationtypes'
 <#
