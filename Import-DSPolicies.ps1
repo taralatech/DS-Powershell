@@ -427,6 +427,9 @@ function compare-andcreatedsobject
 function Add-Dsobjects
 	{
     [CmdletBinding()]
+    #Function only imports individual .json files, strips away the object ID and then adds the object.  A better version would be fed a PScustom object
+    # and iterate through that to create new objects.  Another function should read the filesystem and where there are multiple files, combine them into a single PScustomobject.
+    #for now, I will create the new function just to deal with intrusion prevention rules.
     Param
         (
         [Parameter(mandatory=$true)]
@@ -523,8 +526,128 @@ function Add-Dsobjects
                     $dsobject = Call-Dsapi -headers $headers -method Post -body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
                     $newID = $dsobject.ID
                     }
-                    write-host "OriginalID "$originalid
-                    write-host "New ID" $newID
+                    #write-host "OriginalID "$originalid
+                    #write-host "New ID" $newID
+                $IDmappings.Add($originalid.ToString(),$newID.ToString())
+                }
+            else
+                {
+                write-host "$filedir is not a file"
+                Add-Content $logfile "$filedir is not a file"
+                }
+            }
+        }
+    END
+        {
+        return $IDmappings
+        }
+    }
+
+function Add-DsobjectsFromPScustom
+	{
+    [CmdletBinding()]
+    #Function takes a PScustomObject containing all of the objects to be added.  Depending on whether the level is 1, 2 or 3 it either just:
+    # adds the objects after removing the ID's (Level 1)
+    # Modifies the references to other objects that now have new ID's (level 2)
+    # I'm trying to work out why level 3 objects don't need their references to other objects rewriting.  Is it a bug?
+    #The prefix is used when a Duplicate object is found.  It's added to the new object.
+    #note work has not started here yet
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [pscustomobject]$importobject,
+        [Parameter(mandatory=$true)]
+        [string]$prefix,
+        [Parameter(mandatory=$true)]
+        [int32]$level
+        )
+    BEGIN
+        {
+        $IDmappings = @{}
+        write-host "Processing add-dsobjects URIpart =  $uripart, prefix = $prefix, level = $level"
+        Add-Content $logfile "Processing add-dsobjects URIpart =  $uripart, prefix = $prefix, level = $level"
+        $dsobjuri = $dsmanager + 'api/' + $uripart + '/'
+        $dssearchuri = $dsmanager + 'api/' + $uripart + '/search'
+        if (($level -gt 3) -or ($level -lt 1))
+            {
+            write-host "level is not 1, 2 or 3"
+            Add-Content $logfile "add-dsobjects called with an invalid level. uripart = $uripart level = $level"
+            throw "Level is not 1, 2 or 3.  This function only works at 3 levels"
+            }
+        }
+    PROCESS
+        {
+        ForEach ($filedir in $filedirlist)
+            {
+            $add = $true
+            $dsimportfile = $filedir.VersionInfo.FileName
+            #write-host "ds import file: $dsimportfile"
+            if ($dsimportfile)
+                {
+                #write-host "DS Import file path = $dsimportfile"
+                Add-Content $logfile "DS Import file path = $dsimportfile"
+                $psobjectfromjson = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
+                $originalid = $psobjectfromjson.ID
+                $psobjectfromjson.psobject.Properties.Remove('ID')
+                #check if object with same name exists
+                $searchname = $psobjectfromjson.name
+                $searchjson = @{
+                            "maxItems" = 1
+                            "searchCriteria" = @{
+                                                "fieldName" = "name"
+                                                "stringValue" = $searchname
+                                                "stringTest" = "equal"
+                                                }
+                            "sortByObjectID" = "true"
+                          } | ConvertTo-Json
+                #$searchobject = Invoke-RestMethod -Headers $headers -method Post -Body $searchjson -ContentType 'application/json' -Uri $dssearchuri -TimeoutSec $resttimeout
+                $searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay
+                if ($searchobject.$uripart.Count -eq 1)
+                    {
+                    write-host "Duplicate name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID
+                    $logcontent = "DUPLICATE_NAME: $uripart " + $psobjectfromjson.name + " ID of dupe:" + $searchobject.$uripart.ID
+                    Add-Content $logfile "$logcontent"
+                    #New function here - compare objects - if the same, output just the new object ID.  If different, create new object with prefix and output new object ID
+                    #Input is imported object and object from API.  Output is Object ID of unmodified/new object.
+                    #This is bad.  I know but I couldn't get the array returned as a property of the pscustomobject returned into a pscustomobject with less code.
+                    $newdsmjson =  $searchobject.$uripart | Convertto-Json
+                    $newdsmpsobject = $newdsmjson | convertfrom-json
+                    $newID = compare-andcreatedsobject $psobjectfromjson $newdsmpsobject $uripart $prefix $level
+                    #$newID = $dsobject.ID
+                    }
+                else
+                    {
+                    write-host "Original name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID
+                    $logcontent = "ORIGINAL_NAME: $uripart " + $psobjectfromjson.name + " ID of dupe:" + $searchobject.$uripart.ID
+                    Add-Content $logfile "$logcontent"
+                    if ($level -eq 2)
+                        {
+                        #search for lists within the object and replace old values with new
+                        $objproperties = $psobjectfromjson.psobject.Properties.Name
+                        ForEach ($objproperty in $objproperties)
+                            {
+                            if ($lookuptable.$objproperty)
+                                {
+                                $oldidconverted = $masteridmappings.($lookuptable.$objproperty).($psobjectfromjson.$objproperty.ToString())
+                                #change the list ID on the object to be created to match the new list
+                                $correctid = $oldidconverted/1 #Convert from string to Int32
+                                $oldid = $psobjectfromjson.$objproperty
+                                $psobjectfromjson.$objproperty = $correctid
+                                $logcontent = "OBJECT_PROPERTY_CHANGE: Imported Object ID: " + $objproperty + ", changed to " + $correctid
+                                Add-Content $logfile $logcontent
+
+                                write-host "OBJECT_PROPERTY_CHANGE: Property: $objproperty Imported Object ID: $oldid , changed to $correctid"
+                                }
+                            }
+                        }
+
+                    $body = $psobjectfromjson | convertto-json
+                    #$dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+                    $dsobject = Call-Dsapi -headers $headers -method Post -body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
+                    $newID = $dsobject.ID
+                    }
+                    #write-host "OriginalID "$originalid
+                    #write-host "New ID" $newID
                 $IDmappings.Add($originalid.ToString(),$newID.ToString())
                 }
             else
@@ -587,18 +710,28 @@ ForEach ($uripart in $ltwoobjects)
 
 #level 3 - Import rules.
 #Ips Rules (ips application types)
+#IPS rules are imported as a single file as individual files simply take too long.
+#the masterIDmapping table needs to be updated so each rule needs to be checked.  The best way to do this in reasonable time is to export
+# all of the IPS rules from the manager and process within this script.  Then just add the custom IPS rules.
 if (! $loadfile) {$lthreeobjects = @('intrusionpreventionrules')}
+pause
 ForEach ($uripart in $lthreeobjects)
     {
-    $dsimportobjects = get-dsfilelist $inputdir $uripart
-    if ($dsimportobjects)
+    $dsimportobject = get-dsfilelist $inputdir $uripart
+    if ($dsimportobject.count -ne 1)
         {
-        $idmappings = add-dsobjects $uripart $dsimportobjects $prefix  3
+        $dsimportfile = $dsimportobject.VersionInfo.FileName
+        Add-Content $logfile "DS Import file path = $dsimportfile"
+        $psobjectfromjson = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
+        #Now Call the DS API to get the IPS Ruleset from the target manager
+        #then compare the objects
+        #where the rules match, update $masterIDmappings.  Where the rules are new, add the rule using the API and update masteridmappings
+        #$idmappings = add-dsobjects $uripart $dsimportobjects $prefix  3
         }
     else
         {
-        write-host "Empty Directory for $uripart" -ForegroundColor Yellow
-        Add-Content $logfile "Empty Directory for $uripart"
+        write-host "Directory does not have only one file $uripart" -ForegroundColor Yellow
+        Add-Content $logfile "Directory does not have only one file for $uripart"
         }
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
@@ -614,6 +747,12 @@ else
     $mappingsobject = $masteridmappings | ConvertTo-Json | ConvertFrom-Json
     }
 #Level 4 - Import the policies
+
+#Import all policies into a PSCustomObject
+#work through the object and create a hashtable where each policy OLD ID is paired with it's "level" Base policies are level 1, children of those are level 2, etc  detect when there are no more polieies (e.g. nothing beyond level 3)
+#Add all of the level 1 policies and update mapping table
+#repeat for level 2
+#........level n
 
 #save the mapping table to disk
 $savejson = $masteridmappings | ConvertTo-Json

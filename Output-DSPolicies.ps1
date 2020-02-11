@@ -252,6 +252,35 @@ Function Export-AllDSobjectsOfType
         }
     }
 
+Function Export-AllDSobjectsAsSingleFile
+    {
+    #pass me the "unique" part of the URI for an object search/describe and I'll get all objects and export them to json
+    [CmdletBinding()]
+    Param
+        (
+        [string]$uripart
+        )
+    BEGIN
+        {
+        write-host Processing "Export-AllDSobjectsAsSingleFile - $uripart"
+        }
+    PROCESS
+        {
+        $dsobjects = Get-AllObjectIDs $uripart
+        $dsobjpath = "$outputdir\$uripart"
+        New-Item -ItemType directory -Path $dsobjpath
+        write-host "URIpart is is: $uripart (Export-AllDSobjectsAsSingleFile)" -ForegroundColor Cyan
+        $fullfile = "$dsobjpath\Output-DSPolicies-$uripart.json"
+        Save-DSObjectasJSON $dsobjects $fullfile
+        write-host "$fullfile saved to disk.  $uripart" -ForegroundColor Cyan
+        Add-Content $logfile "$fullfile saved to disk.  $uripart"
+        }
+    END
+        {
+        write-host "Export-AllDSobjectsOfType completed"
+        }
+    }
+
 #Begin the Main body
 #Check to see if the directory exists.  If not, create it
 if ((Test-Path $outputdir -PathType Container) -eq $true)
@@ -294,9 +323,10 @@ Export-AllDSobjectsOfType 'integritymonitoringrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'loginspectionrules'
 Start-Sleep $backoffdelay
-Export-AllDSobjectsOfType 'intrusionpreventionrules'
+Export-AllDSobjectsAsSingleFile 'intrusionpreventionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'applicationtypes'
+
 <#
 Missing:
 antiMalwareSettingScanCacheRealTimeConfigId"
