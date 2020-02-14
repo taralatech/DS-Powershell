@@ -676,7 +676,7 @@ function Add-DsobjectsFromPScustom
                 $newID = $newipsrule.ID
                 $ipsrulename = $oldipsrule.name
                 Write-Host "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
-                # temp removed for speed   add-content $logfile "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
+                add-content $logfile "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
                 #update masterIDmappings
                 $IDmappings.Add($originalid.ToString(),$newID.ToString())
                 add-content $logfile $IDmappings
@@ -703,6 +703,7 @@ function Add-DsobjectsFromPScustom
                         "sortByObjectID" = "true"
                       } | ConvertTo-Json
             $searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay
+            #If a search for the object by name returns an object, there is a duplicate.  Compare the duplicate and if the same, just update.  If different, create a new object
             if ($searchobject.$uripart.Count -eq 1)
                 {
                 write-host "Duplicate name $uripart " $ruleobject.name " ID of dupe:" $searchobject.$uripart.ID
@@ -713,12 +714,13 @@ function Add-DsobjectsFromPScustom
                 $newdsmpsobject = $newdsmjson | convertfrom-json
                 $newID = compare-andcreatedsobject $ruleobject $newdsmpsobject $uripart $prefix $level
                 }
+            #If the search does not return an object, create a new one.  There are no dupes
             else
                 {
-                #Search based on object name has returned no results.  Create a new object and get its ID
                 write-host "New Object to be created: $uripart " $ruleobject.name
                 $logcontent = "New Object to be created: $uripart " + $ruleobject.name
                 Add-Content $logfile "$logcontent"
+                #If level is 2 or 3, the object will contain lists and they will have incorrect values.  Replace the "old" values from the Old DSM to the values on the new DSM.
                 if (($level -eq 2)-or ($level -eq 3))
                     {
                     #search for lists within the object and replace old values with new
@@ -734,14 +736,12 @@ function Add-DsobjectsFromPScustom
                             $ruleobject.$objproperty = $correctid
                             $logcontent = "OBJECT_PROPERTY_CHANGE: Imported Object ID: " + $objproperty + ", changed to " + $correctid
                             Add-Content $logfile $logcontent
-
                             write-host "OBJECT_PROPERTY_CHANGE: Property: $objproperty Imported Object ID: $oldid , changed to $correctid"
                             }
                         }
                     }
-
+                #Now the Object has been updated If necessary, create it on the DSM
                 $body = $ruleobject | convertto-json
-                #$dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
                 $dsobject = Call-Dsapi -headers $headers -method Post -body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
                 $newID = $dsobject.ID
                 }
