@@ -1,4 +1,5 @@
 ﻿<#
+#see line 807.  There is a bug with mappings
 Description here
 $masteridmappings.$uripart.Item($number)
 gets the value for the key.  using $masteridmappings.$uripart.number doesn't work for first item.
@@ -215,10 +216,11 @@ Function Merge-DSobjects
         }
     }
 
-Function Get-DSObjectsLarge
+Function Get-DSObjects
     {
-    #Due to 500 Item limit, requests need to be split.  This is used to perform multiple API calls and combine the results into one object.
+    #Due to 5000 Item limit, requests need to be split.  This is used to perform multiple API calls and combine the results into one object.
     #Uses functions call-dsapi and merge-dsobjects
+    #Request is split into multiple requests for up to 1000 records.
     [CmdletBinding()]
     Param
         (
@@ -263,7 +265,8 @@ Function Get-DSObjectsLarge
             write-host "$dsobjectscount - DSobjectscount"
             $startid = $startid + 1000
             }
-        until ($dsobjects.$uripart.Count -eq 0)
+        #until ($dsobjects.$uripart.Count -eq 0)
+        until ($dsobjects.$uripart.Count -lt 999)
         }
     END
         {
@@ -558,24 +561,20 @@ function Add-Dsobjects
                                                 }
                             "sortByObjectID" = "true"
                           } | ConvertTo-Json
-                #$searchobject = Invoke-RestMethod -Headers $headers -method Post -Body $searchjson -ContentType 'application/json' -Uri $dssearchuri -TimeoutSec $resttimeout
                 $searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay
                 if ($searchobject.$uripart.Count -eq 1)
                     {
                     write-host "Duplicate name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID
                     $logcontent = "DUPLICATE_NAME: $uripart " + $psobjectfromjson.name + " ID of dupe:" + $searchobject.$uripart.ID
                     Add-Content $logfile "$logcontent"
-                    #New function here - compare objects - if the same, output just the new object ID.  If different, create new object with prefix and output new object ID
-                    #Input is imported object and object from API.  Output is Object ID of unmodified/new object.
                     #This is bad.  I know but I couldn't get the array returned as a property of the pscustomobject returned into a pscustomobject with less code.
                     $newdsmjson =  $searchobject.$uripart | Convertto-Json
                     $newdsmpsobject = $newdsmjson | convertfrom-json
                     $newID = compare-andcreatedsobject $psobjectfromjson $newdsmpsobject $uripart $prefix $level
-                    #$newID = $dsobject.ID
                     }
                 else
                     {
-                    write-host "Original name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID
+                    write-host "Original name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID #There may be a bug here.  Possible that there is never a dupe.
                     $logcontent = "ORIGINAL_NAME: $uripart " + $psobjectfromjson.name + " ID of dupe:" + $searchobject.$uripart.ID
                     Add-Content $logfile "$logcontent"
                     if ($level -eq 2)
@@ -629,8 +628,6 @@ function Add-DsobjectsFromPScustom
     # Modifies the references to other objects that now have new ID's (level 2)
     # I'm trying to work out why level 3 objects don't need their references to other objects rewriting.  Is it a bug?
     #The prefix is used when a Duplicate object is found.  It's added to the new object.
-    #note work has not started here yet
-    #************************note also that this is not currently used!********************************
     Param
         (
         [Parameter(mandatory=$true)]
@@ -658,12 +655,40 @@ function Add-DsobjectsFromPScustom
         }
     PROCESS
         {
-        write-host $importobjects $ruleobjects
-        ForEach ($ruleobject in $importobjects)
+        #Importobjects is the pscustomobject loaded from the file and passed into this function
+        #$objectfromdsm is the full set of objects on the new DSM to be compared to
+        $objectfromdsm = Get-DSObjects $dsmanager $uripart $resttimeout $backoffdelay
+        if ($level -eq 3)
+            {
+            #prepare variables for easy comparison
+            $oldobjects = $importobjects.$uripart
+            $newobjects = $objectfromdsm.$uripart
+            #lookup the new rule ID's
+            add-content $logfile "Processing IPS rules"
+            add-content $logfile "---------------------------------------------------------"
+            #Filter out custom IPS rules.  For the Trend IPS rules we just need to map the old ID's to the new ID's
+            $oldstdipsrules = $oldobjects | where type
+            ForEach ($oldipsrule in $oldstdipsrules)
+                {
+                #then compare the objects
+                $newipsrule = $newobjects | where identifier -eq $oldipsrule.identifier
+                $originalid = $oldipsrule.ID
+                $newID = $newipsrule.ID
+                $ipsrulename = $oldipsrule.name
+                Write-Host "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
+                # temp removed for speed   add-content $logfile "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
+                #update masterIDmappings
+                $IDmappings.Add($originalid.ToString(),$newID.ToString())
+                add-content $logfile $IDmappings
+                }
+            #Now to the lookup/add where necessary only for th custom IPS rules
+            $filteredrules = $oldobjects | where template
+            }
+        #Search the Fileterd rules (custom IPS rules in this case) individually.  There aren't lots of them so the multiple API calls isn't much of a time waster.
+        ForEach ($ruleobject in $filteredrules)
             {
             write-host $ruleobject
             write-host "------------------"
-            # delete $psobjectfromjson = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
             $originalid = $ruleobject.ID
             $ruleobject.psobject.Properties.Remove('ID')
             #check if object with same name exists
@@ -683,56 +708,44 @@ function Add-DsobjectsFromPScustom
                 write-host "Duplicate name $uripart " $ruleobject.name " ID of dupe:" $searchobject.$uripart.ID
                 $logcontent = "DUPLICATE_NAME: $uripart " + $ruleobject.name + " ID of dupe:" + $searchobject.$uripart.ID
                 Add-Content $logfile "$logcontent"
-                #New function here - compare objects - if the same, output just the new object ID.  If different, create new object with prefix and output new object ID
-                #Input is imported object and object from API.  Output is Object ID of unmodified/new object.
                 #This is bad.  I know but I couldn't get the array returned as a property of the pscustomobject returned into a pscustomobject with less code.
                 $newdsmjson =  $searchobject.$uripart | Convertto-Json
                 $newdsmpsobject = $newdsmjson | convertfrom-json
                 $newID = compare-andcreatedsobject $ruleobject $newdsmpsobject $uripart $prefix $level
-                $IDmappings.Add($originalid.ToString(),$newID.ToString())
                 }
-                <#
             else
                 {
-                    write-host "Original name $uripart " $psobjectfromjson.name " ID of dupe:" $searchobject.$uripart.ID
-                    $logcontent = "ORIGINAL_NAME: $uripart " + $psobjectfromjson.name + " ID of dupe:" + $searchobject.$uripart.ID
-                    Add-Content $logfile "$logcontent"
-                    if ($level -eq 2)
+                #Search based on object name has returned no results.  Create a new object and get its ID
+                write-host "New Object to be created: $uripart " $ruleobject.name
+                $logcontent = "New Object to be created: $uripart " + $ruleobject.name
+                Add-Content $logfile "$logcontent"
+                if (($level -eq 2)-or ($level -eq 3))
+                    {
+                    #search for lists within the object and replace old values with new
+                    $objproperties = $ruleobject.psobject.Properties.Name
+                    ForEach ($objproperty in $objproperties)
                         {
-                        #search for lists within the object and replace old values with new
-                        $objproperties = $psobjectfromjson.psobject.Properties.Name
-                        ForEach ($objproperty in $objproperties)
+                        if ($lookuptable.$objproperty)
                             {
-                            if ($lookuptable.$objproperty)
-                                {
-                                $oldidconverted = $masteridmappings.($lookuptable.$objproperty).($psobjectfromjson.$objproperty.ToString())
-                                #change the list ID on the object to be created to match the new list
-                                $correctid = $oldidconverted/1 #Convert from string to Int32
-                                $oldid = $psobjectfromjson.$objproperty
-                                $psobjectfromjson.$objproperty = $correctid
-                                $logcontent = "OBJECT_PROPERTY_CHANGE: Imported Object ID: " + $objproperty + ", changed to " + $correctid
-                                Add-Content $logfile $logcontent
+                            $oldidconverted = $masteridmappings.($lookuptable.$objproperty).($ruleobject.$objproperty.ToString())
+                            #change the list ID on the object to be created to match the new list
+                            $correctid = $oldidconverted/1 #Convert from string to Int32
+                            $oldid = $ruleobject.$objproperty
+                            $ruleobject.$objproperty = $correctid
+                            $logcontent = "OBJECT_PROPERTY_CHANGE: Imported Object ID: " + $objproperty + ", changed to " + $correctid
+                            Add-Content $logfile $logcontent
 
-                                write-host "OBJECT_PROPERTY_CHANGE: Property: $objproperty Imported Object ID: $oldid , changed to $correctid"
-                                }
+                            write-host "OBJECT_PROPERTY_CHANGE: Property: $objproperty Imported Object ID: $oldid , changed to $correctid"
                             }
                         }
-
-                    $body = $psobjectfromjson | convertto-json
-                    #$dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
-                    $dsobject = Call-Dsapi -headers $headers -method Post -body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
-                    $newID = $dsobject.ID
                     }
-                #write-host "OriginalID "$originalid
-                #write-host "New ID" $newID
-                $IDmappings.Add($originalid.ToString(),$newID.ToString())
+
+                $body = $ruleobject | convertto-json
+                #$dsobject = Invoke-RestMethod -Headers $headers -method Post -Body $body -ContentType 'application/json' -Uri $dsobjuri -TimeoutSec $resttimeout
+                $dsobject = Call-Dsapi -headers $headers -method Post -body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
+                $newID = $dsobject.ID
                 }
-            else
-                {
-                write-host "$filedir is not a file"
-                Add-Content $logfile "$filedir is not a file"
-                }
-            #>
+            $IDmappings.Add($originalid.ToString(),$newID.ToString())
             }
         }
     END
@@ -795,42 +808,13 @@ if (! $loadfile) {$lthreeobjects = @('intrusionpreventionrules')}
 ForEach ($uripart in $lthreeobjects)
     {
     $dsimportobject = get-dsfilelist $inputdir $uripart
+    $dsimportfile = $dsimportobject.VersionInfo.FileName
+    Add-Content $logfile "DS Import file path = $dsimportfile"
+    #load the IPS object from the filesystem
+    $objectfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
     if ($dsimportobject.count -eq 1)
         {
-        $dsimportfile = $dsimportobject.VersionInfo.FileName
-        Add-Content $logfile "DS Import file path = $dsimportfile"
-        #load the IPS object from the filesystem
-        $ipsfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
-        #Now Call the DS API to get the IPS Ruleset from the target manager
-        $ipsfromdsm = Get-DSObjectsLarge $dsmanager $uripart $resttimeout $backoffdelay
-        #identifiers are unique, the same across DSM's and apply to all Trend Micro published rules.  Custom rules do not have an identifier.
-        $oldips = $ipsfromfile.$uripart
-        #$oldipsidentifier = $ipsfromfile.$uripart.identifier
-        $newips = $ipsfromdsm.$uripart
-        #lookup the new rule ID's
-        add-content $logfile "Processing IPS rules"
-        add-content $logfile "---------------------------------------------------------"
-        $oldstdipsrules = $oldips | where type
-        $IDmappings = @{}
-        ForEach ($oldipsrule in $oldstdipsrules)
-            {
-            #then compare the objects
-            $newipsrule = $newips | where identifier -eq $oldipsrule.identifier
-            $originalid = $oldipsrule.ID
-            $newID = $newipsrule.ID
-            $ipsrulename = $oldipsrule.name
-            Write-Host "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
-            add-content $logfile "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
-            #update masterIDmappings
-            $IDmappings.Add($originalid.ToString(),$newID.ToString())
-            add-content $logfile $IDmappings
-            }
-        $oldcustomipsrules = $oldips | where template
-        $idmappings = Add-DsobjectsFromPScustom -importobjects $oldcustomipsrules -uripart $uripart -prefix $prefix -level 3
-
-        #where the rules match, update $masterIDmappings.  Where the rules are new, add the rule using the API and update masteridmappings
-        #to find all custom rules - $oldips | where template
-        #$idmappings = add-dsobjects $uripart $dsimportobjects $prefix  3
+        $idmappings = Add-DsobjectsFromPScustom -importobjects $objectfromfile -uripart $uripart -prefix $prefix -level 3
         }
     else
         {
