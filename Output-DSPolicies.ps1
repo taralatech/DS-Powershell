@@ -168,7 +168,18 @@ Function Get-AllObjectIDs
     #Return an object containing all configurations of the specified type
     BEGIN
         {
-        $geturi = $dsmanager + 'api/' + $uripart + '/'
+        if ($uripart -eq 'policies')
+            {
+            $geturi = $dsmanager + 'api/' + $uripart + '?overrides=true'
+            write-host "Object is a policy - requesting overrides only"
+            }
+        else
+            {
+            $geturi = $dsmanager + 'api/' + $uripart + '/'
+            }
+
+
+        #$geturi = $dsmanager + 'api/' + $uripart + '/'
         }
     PROCESS
         {
@@ -299,7 +310,8 @@ Export-AllDSobjectsOfType 'antimalwareconfigurations'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'directorylists'
 Start-Sleep $backoffdelay
-Export-AllDSobjectsOfType 'policies'
+#Export-AllDSobjectsOfType 'policies'
+Export-AllDSobjectsAsSingleFile 'policies'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'fileextensionlists'
 Start-Sleep $backoffdelay
@@ -319,9 +331,11 @@ Export-AllDSobjectsOfType 'contexts'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'statefulconfigurations'
 Start-Sleep $backoffdelay
-Export-AllDSobjectsOfType 'integritymonitoringrules'
+#Export-AllDSobjectsOfType 'integritymonitoringrules'
+Export-AllDSobjectsAsSingleFile  'integritymonitoringrules'
 Start-Sleep $backoffdelay
-Export-AllDSobjectsOfType 'loginspectionrules'
+#Export-AllDSobjectsOfType 'loginspectionrules'
+Export-AllDSobjectsAsSingleFile 'loginspectionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsAsSingleFile 'intrusionpreventionrules'
 Start-Sleep $backoffdelay

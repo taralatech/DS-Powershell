@@ -1,5 +1,4 @@
 ﻿<#
-#see line 807.  There is a bug with mappings
 Description here
 $masteridmappings.$uripart.Item($number)
 gets the value for the key.  using $masteridmappings.$uripart.number doesn't work for first item.
@@ -18,7 +17,7 @@ param (
 
 
 #For testing
-$inputdir = "C:\scripts\log\export-DSM5"
+$inputdir = "C:\scripts\log\export-DSM6"
 $dsmanager = "https://deepsec.tarala.me.uk:4119/"
 $logfilepath = "C:\scripts\log"
 $prefix = "tst1"
@@ -227,11 +226,19 @@ Function Get-DSObjects
         [Parameter(Mandatory=$true)][string]$dsmanager,
         [Parameter(Mandatory=$true)][string]$uripart,
         [Parameter(Mandatory=$true)][int32]$resttimeout,
-        [Parameter(Mandatory=$true)][int32]$backoffdelay
+        [Parameter(Mandatory=$true)][int32]$backoffdelay,
+        [Parameter(Mandatory=$false)][string]$parameters
         )
     BEGIN
         {
-        $geturi = $dsmanager + 'api/' + $uripart + '/search/'
+        if ($parameters)
+            {
+            $geturi = $dsmanager + 'api/' + $uripart + '/search/' + $parameters
+            }
+        else
+            {
+            $geturi = $dsmanager + 'api/' + $uripart + '/search/'
+            }
         }
     PROCESS
         {
@@ -250,13 +257,11 @@ Function Get-DSObjects
                       } | ConvertTo-Json
             if ($startid -eq 1)
                 {
-                #$dsobjects = Invoke-RestMethod -Headers $headers -method Post -Uri $geturi -body $json -TimeoutSec $resttimeout
                 $dsobjects = Call-Dsapi -headers $headers -method Post -Body $json -uri $geturi -resttimeout $resttimeout -backoffdelay $backoffdelay
                 $dsfullobjects = $dsobjects
                 }
             else
                 {
-                #$dsobjects = Invoke-RestMethod -Headers $headers -method Post -Uri $geturi -body $json -TimeoutSec $resttimeout
                 $dsobjects = Call-Dsapi -headers $headers -method Post -Body $json -uri $geturi -resttimeout $resttimeout -backoffdelay $backoffdelay
                 $dsfullobjects = Merge-DSobjects $dsobjects $dsfullobjects $uripart
                 }
@@ -505,12 +510,50 @@ function compare-andcreatedsobject
         }
     }
 
+function replace-dslists
+    {
+    [CmdletBinding()]
+    #Function check each property using $lookuptable - if there is a match on $lookuptable,
+    #use $masteridmappings replace the value from the old DSM with the value for the object created on the new DSM
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [string]$checkobject
+        )  
+    BEGIN
+        {
+        #search for lists within the object and replace old values with new
+        $objproperties = $checkobject.psobject.Properties.Name
+        }            
+    PROCESS
+        {
+        ForEach ($objproperty in $objproperties)
+            {
+            if ($lookuptable.$objproperty)
+                {
+                $oldidconverted = $masteridmappings.($lookuptable.$objproperty).($checkobject.$objproperty.ToString())
+                #change the list ID on the object to be created to match the new list
+                $correctid = $oldidconverted/1 #Convert from string to Int32
+                $oldid = $checkobject.$objproperty
+                $checkobject.$objproperty = $correctid
+                $logcontent = "OBJECT_PROPERTY_CHANGE: Imported Object ID: " + $objproperty + ", changed to " + $correctid
+                Add-Content $logfile $logcontent
+                write-host "OBJECT_PROPERTY_CHANGE: Property: $objproperty Imported Object ID: $oldid , changed to $correctid"
+                }
+            }
+        }
+    END
+        {
+        return $checkobject
+        }                    
+    }
+
 function Add-Dsobjects
 	{
     [CmdletBinding()]
     #Function only imports individual .json files, strips away the object ID and then adds the object.  A better version would be fed a PScustom object
     # and iterate through that to create new objects.  Another function should read the filesystem and where there are multiple files, combine them into a single PScustomobject.
-    #for now, I will create the new function just to deal with intrusion prevention rules.
+    #for now, I will create the new function just to deal with intrusion prevention rules and policies.  Ideally, this function would be removed.
     Param
         (
         [Parameter(mandatory=$true)]
@@ -580,6 +623,7 @@ function Add-Dsobjects
                     if ($level -eq 2)
                         {
                         #search for lists within the object and replace old values with new
+                        #use replace-dslists instead here
                         $objproperties = $psobjectfromjson.psobject.Properties.Name
                         ForEach ($objproperty in $objproperties)
                             {
@@ -646,7 +690,7 @@ function Add-DsobjectsFromPScustom
         Add-Content $logfile "Processing Add-DsobjectsFromPScustom URIpart =  $uripart, prefix = $prefix, level = $level"
         $dsobjuri = $dsmanager + 'api/' + $uripart + '/'
         $dssearchuri = $dsmanager + 'api/' + $uripart + '/search'
-        if (($level -gt 3) -or ($level -lt 1))
+        if (($level -gt 5) -or ($level -lt 1))
             {
             write-host "level is not 1, 2 or 3"
             Add-Content $logfile "Add-DsobjectsFromPScustom called with an invalid level. uripart = $uripart level = $level"
@@ -657,7 +701,7 @@ function Add-DsobjectsFromPScustom
         {
         #Importobjects is the pscustomobject loaded from the file and passed into this function
         #$objectfromdsm is the full set of objects on the new DSM to be compared to
-        $objectfromdsm = Get-DSObjects $dsmanager $uripart $resttimeout $backoffdelay
+        $objectfromdsm = Get-DSObjects $dsmanager $uripart $resttimeout $backoffdelay -parameters '?overrides=true'
         if ($level -eq 3)
             {
             #prepare variables for easy comparison
@@ -668,8 +712,11 @@ function Add-DsobjectsFromPScustom
             add-content $logfile "---------------------------------------------------------"
             #Filter out custom IPS rules.  For the Trend IPS rules we just need to map the old ID's to the new ID's
             $oldstdipsrules = $oldobjects | where type
+            write-host "There are $oldstdipsrules.count IPS Rules"
+            $ipscounter = 0
             ForEach ($oldipsrule in $oldstdipsrules)
                 {
+                $ipscounter
                 #then compare the objects
                 $newipsrule = $newobjects | where identifier -eq $oldipsrule.identifier
                 $originalid = $oldipsrule.ID
@@ -683,6 +730,10 @@ function Add-DsobjectsFromPScustom
                 }
             #Now to the lookup/add where necessary only for th custom IPS rules
             $filteredrules = $oldobjects | where template
+            }
+        if ($level -eq 4)
+            {
+            $filteredrules = $importobjects.$uripart | where parentID -eq $null
             }
         #Search the Fileterd rules (custom IPS rules in this case) individually.  There aren't lots of them so the multiple API calls isn't much of a time waster.
         ForEach ($ruleobject in $filteredrules)
@@ -724,6 +775,7 @@ function Add-DsobjectsFromPScustom
                 if (($level -eq 2)-or ($level -eq 3))
                     {
                     #search for lists within the object and replace old values with new
+                    #use replace-dslists to do the propery replacement $ruleobject = replace-dslists $ruleobject
                     $objproperties = $ruleobject.psobject.Properties.Name
                     ForEach ($objproperty in $objproperties)
                         {
@@ -754,7 +806,7 @@ function Add-DsobjectsFromPScustom
         }
     }
 
-
+<#
 #Main body
 #Level One - Import objects with no links to other objects
 #Forget IM, LI and AC for now.
@@ -834,13 +886,47 @@ else
     {
     $mappingsobject = $masteridmappings | ConvertTo-Json | ConvertFrom-Json
     }
+
+
+
+#>
+
 #Level 4 - Import the policies
 
 #Import all policies into a PSCustomObject
 #work through the object and create a hashtable where each policy OLD ID is paired with it's "level" Base policies are level 1, children of those are level 2, etc  detect when there are no more polieies (e.g. nothing beyond level 3)
-#Add all of the level 1 policies and update mapping table
-#repeat for level 2
-#........level n
+#Forget levels.  Just use masteridmappings.  Split the PScustomobject into two objects for each level - start by using  where-object
+#Split to where (! parent policyID) and another object where (parent policy ID)
+#loop through levels splitting to where (parent policy ID exists in IDmappings) and where (!parent policy ID exists in IDmappings)
+#send split pscustomobject to $policyIDmappings = new-dsobjectfrompscustom
+#add the objects together using Merge-DSobjects.  Merge-dsobjects needs a uripart so it will be object.policies.hashtable - consider using a dictionary instead for performance reasons?
+#once complete, update $masteridmappings
+
+#lines 774- 778 - use the new function replace-dslists.  For level 4, the policy properties take the form policy.$uripart.property
+#e.g. for $object.policies.(1).antiMalware.realTimeScanConfigurationID will return the ID of the object to have its ID replaced for the first policy
+#check policies for all of the referred objects.  They are simply one level deeper than for L2 and L3 objects.
+
+$uripart = 'policies'
+$dsimportobject = get-dsfilelist $inputdir $uripart
+$dsimportfile = $dsimportobject.VersionInfo.FileName
+Add-Content $logfile "DS Import file path = $dsimportfile"
+#load the Policies object from the filesystem
+$fullobjectfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
+#$objectfromfile = @{}
+if ($dsimportfile.count -eq 1)
+    {
+    #$objectfromfile.$uripart += $fullobjectfromfile.$uripart | where parentID -eq $null
+    $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level 4
+    }
+else
+    {
+    write-host "Directory does not have only one file $uripart" -ForegroundColor Yellow
+    Add-Content $logfile "Directory does not have only one file for $uripart"
+    }
+<#
+$masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
+
+##############################################################
 
 #save the mapping table to disk
 $savejson = $masteridmappings | ConvertTo-Json
@@ -853,3 +939,4 @@ if ($global:irreconcilabledifferences.keys.Count -gt 0)
     $savediff = $global:irreconcilabledifferences | ConvertTo-Json
     Add-Content $difffile $savediff
     }
+#>
