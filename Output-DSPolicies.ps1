@@ -3,9 +3,9 @@ Description here
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
-    [Parameter(Mandatory=$false)][string]$outputdir,
-    [Parameter(Mandatory=$false)][string]$dsmanager,
-    [Parameter(Mandatory=$false)][string]$logfilepath
+    [Parameter(Mandatory=$true)][string]$outputdir,
+    [Parameter(Mandatory=$true)][string]$dsmanager,
+    [Parameter(Mandatory=$true)][string]$logfilepath
 )
 
 #enter the timeout for REST queries here
@@ -216,7 +216,7 @@ Function Save-DSObjectasJSON
         }
     PROCESS
         {
-        $savejson = $saveobject | ConvertTo-Json
+        $savejson = $saveobject | ConvertTo-Json -Depth 4
         $savejsonfile = New-Item -type file "$file"
         Add-Content $savejsonfile $savejson
         }
@@ -341,6 +341,8 @@ Export-AllDSobjectsAsSingleFile 'intrusionpreventionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'applicationtypes'
 
+pause
+#Export-AllDSobjectsAsSingleFile 'policies'
 <#
 Missing:
 antiMalwareSettingScanCacheRealTimeConfigId"

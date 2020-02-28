@@ -3,6 +3,7 @@ Description here
 $masteridmappings.$uripart.Item($number)
 gets the value for the key.  using $masteridmappings.$uripart.number doesn't work for first item.
 test: $masteridmappings.$uripart.'number'
+Check line 560. there is a bug preventing arrays of ruled ID's updating
 
 
 #>
@@ -17,10 +18,11 @@ param (
 
 
 #For testing
-$inputdir = "C:\scripts\log\export-DSM6"
+$inputdir = "C:\scripts\log\export-DSM7"
 $dsmanager = "https://deepsec.tarala.me.uk:4119/"
 $logfilepath = "C:\scripts\log"
 $prefix = "tst1"
+#$loadfile = "C:\scripts\log\Output-DSPolicies-20200214065212-1.json"
 #end testing
 
 #enter the timeout for REST queries here
@@ -50,6 +52,27 @@ $lookuptable = @{
 "applicationTypeID" = "applicationtypes"
 "contextID" = "contexts"
 "scheduleID" = "schedules"
+"realTimeScanConfigurationID" = "antimalwareconfigurations"
+"manualScanConfigurationID" = "antimalwareconfigurations"
+"realTimeScanScheduleID" = "schedules"
+"scheduledScanConfigurationID" = "schedules"
+"globalStatefulConfigurationID" = "statefulconfigurations"
+#These are not "direct" lookups - they are ruleids concatenated with the policy element that uses the ruleIDs because Firewall, IPS, IM and LI engines all just use ruleIDs
+#all of the below are realted to policies only
+"firewallruleIDs" = "firewallrules"
+"intrusionPreventionruleIDs" = "intrusionpreventionrules"
+#IM - insert here
+#LI - insert here
+#these are direct lookups.  They're here for readability because They're related to policies
+"applicationTypeIDs" = "applicationtypes"
+"parentID" = "policies"
+#these are used to identify lists one level below for policies
+"antiMalware" = "nested"
+"firewall" = "firewallrules"
+"intrusionPrevention" = "intrusionpreventionrules"
+"integrityMonitoring" = "nested"
+"applicationControl" = "nested"
+"ruleIDs" = "array"
 }
 $global:irreconcilabledifferences = @{}
 
@@ -513,32 +536,88 @@ function compare-andcreatedsobject
 function replace-dslists
     {
     [CmdletBinding()]
+    #function takes an object property that refers to an ID and replaces the ID reference to the correct reference for the new manager using the lookup table.
+    #If the function is passed RuleIDs then it needs to take in an array.  Each element needs to be updated and an array with the new values returned.
+    #The listcheck is the object name in $masteridmappings that the array of rules are checked against.
+    Param
+        (
+        [Parameter(mandatory)]
+        [string]$listcheck,
+        [Parameter(mandatory,ParameterSetName = 'IndividualID')]
+        [int32]$listID,
+        [Parameter(mandatory,ParameterSetName = 'ArrayOfIDs')]
+        [array]$listIDArray
+        #Look into param if or etc for using the array as a different variable instead.
+        )
+    BEGIN
+        {
+        $arrayidobjectlist = @('firewallrules','applicationtypes','intrusionpreventionrules') #List the properties that need to go a layer deeper
+        }
+    PROCESS
+        {
+        if ($arrayidobjectlist -contains $listcheck)
+            {
+            #For Each elelment in the array, replace with the ID from the New DSM
+            $updatedlistID = $listIDArray | ForEach {$_ = $masteridmappings.($lookuptable.$listcheck).($_.ToString());$_} # this does not work.  $updatedlistID is always empty?
+            #
+            }
+        else
+            {
+            $updatedlistID = $masteridmappings.($lookuptable.$listcheck).($listID.ToString())
+            #$oldidconverted = $masteridmappings.($lookuptable.$objproperty).($checkobject.$objproperty.ToString())
+            #change the list ID on the object to be created to match the new list
+            }
+        }
+    END
+        {
+        return $updatedlistID
+        }
+    }
+
+function replace-dsnestedlists
+    {
+    [CmdletBinding()]
     #Function check each property using $lookuptable - if there is a match on $lookuptable,
     #use $masteridmappings replace the value from the old DSM with the value for the object created on the new DSM
     Param
         (
         [Parameter(mandatory=$true)]
-        [string]$checkobject
+        [pscustomobject]$checkobject
         )  
     BEGIN
         {
         #search for lists within the object and replace old values with new
         $objproperties = $checkobject.psobject.Properties.Name
+        $arrayidobjectlist = @('nested','antiMalware','firewallrules','applicationtypes','intrusionpreventionrules') #List the properties that need to go a layer deeper
+        $arraysubobjectidlist = @('ruleIDs','applicationTypeIDs') # List of arrays of ID's
         }            
     PROCESS
         {
         ForEach ($objproperty in $objproperties)
             {
-            if ($lookuptable.$objproperty)
+            #check to see if the property contains multiple child properties that may contain lists that need replacing.
+            if ($arrayidobjectlist -contains $lookuptable.$objproperty)
                 {
-                $oldidconverted = $masteridmappings.($lookuptable.$objproperty).($checkobject.$objproperty.ToString())
-                #change the list ID on the object to be created to match the new list
-                $correctid = $oldidconverted/1 #Convert from string to Int32
-                $oldid = $checkobject.$objproperty
-                $checkobject.$objproperty = $correctid
-                $logcontent = "OBJECT_PROPERTY_CHANGE: Imported Object ID: " + $objproperty + ", changed to " + $correctid
-                Add-Content $logfile $logcontent
-                write-host "OBJECT_PROPERTY_CHANGE: Property: $objproperty Imported Object ID: $oldid , changed to $correctid"
+                $subproperties = $checkobject.$objproperty.psobject.Properties.Name
+                #loop through each property.  Check to see if it's to be have its lists changed
+                ForEach ($subproperty in $subproperties)
+                    {
+                    #if ($lookuptable.$subproperty -eq "array")
+                    if ($arraysubobjectidlist -contains $subproperty)
+                        {
+                        $listcheck = $lookuptable.$objproperty #provide replace-dslists information on which object in $masteridmappings to search
+                        $checkobject.$objproperty.$subproperty = replace-dslists -listcheck $listcheck -listIDArray $checkobject.$objproperty.$subproperty
+                        }
+                    elseif ($lookuptable.$subproperty)
+                        {
+                        $checkobject.$objproperty.$subproperty = replace-dslists -listcheck $subproperty -listID $checkobject.$objproperty.$subproperty
+                        }
+                    }
+                }
+            #see if the property is a list that needs replacing
+            elseif ($lookuptable.$objproperty)
+                {
+                $checkobject.$objproperty = replace-dslists -listcheck $objproperty -listID $checkobject.$objproperty
                 }
             }
         }
@@ -734,6 +813,11 @@ function Add-DsobjectsFromPScustom
         if ($level -eq 4)
             {
             $filteredrules = $importobjects.$uripart | where parentID -eq $null
+            #create uripart array.  array to contain 
+            ForEach ($ruleobject in $filteredrules)
+                {
+                replace-dsnestedlists $ruleobject
+                }
             }
         #Search the Fileterd rules (custom IPS rules in this case) individually.  There aren't lots of them so the multiple API calls isn't much of a time waster.
         ForEach ($ruleobject in $filteredrules)
@@ -806,7 +890,7 @@ function Add-DsobjectsFromPScustom
         }
     }
 
-<#
+
 #Main body
 #Level One - Import objects with no links to other objects
 #Forget IM, LI and AC for now.
@@ -889,7 +973,7 @@ else
 
 
 
-#>
+
 
 #Level 4 - Import the policies
 
@@ -899,13 +983,16 @@ else
 #Split to where (! parent policyID) and another object where (parent policy ID)
 #loop through levels splitting to where (parent policy ID exists in IDmappings) and where (!parent policy ID exists in IDmappings)
 #send split pscustomobject to $policyIDmappings = new-dsobjectfrompscustom
-#add the objects together using Merge-DSobjects.  Merge-dsobjects needs a uripart so it will be object.policies.hashtable - consider using a dictionary instead for performance reasons?
+#add the objects together using Merge-DSobjects.  Merge-dsobjects needs a uripart so it will be object.policies.hashtable
 #once complete, update $masteridmappings
 
 #lines 774- 778 - use the new function replace-dslists.  For level 4, the policy properties take the form policy.$uripart.property
 #e.g. for $object.policies.(1).antiMalware.realTimeScanConfigurationID will return the ID of the object to have its ID replaced for the first policy
 #check policies for all of the referred objects.  They are simply one level deeper than for L2 and L3 objects.
-
+if ($loadfile)
+    {
+    $masteridmappings = Get-Content -Raw -Path $loadfile | ConvertFrom-Json
+    }
 $uripart = 'policies'
 $dsimportobject = get-dsfilelist $inputdir $uripart
 $dsimportfile = $dsimportobject.VersionInfo.FileName
