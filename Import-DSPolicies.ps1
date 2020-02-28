@@ -805,7 +805,6 @@ function Add-DsobjectsFromPScustom
                 add-content $logfile "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
                 #update masterIDmappings
                 $IDmappings.Add($originalid.ToString(),$newID.ToString())
-                add-content $logfile $IDmappings
                 }
             #Now to the lookup/add where necessary only for th custom IPS rules
             $filteredrules = $oldobjects | where template
