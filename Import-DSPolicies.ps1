@@ -3,7 +3,8 @@ Description here
 $masteridmappings.$uripart.Item($number)
 gets the value for the key.  using $masteridmappings.$uripart.number doesn't work for first item.
 test: $masteridmappings.$uripart.'number'
-Check line 560. there is a bug preventing arrays of ruled ID's updating
+Layer One of the policies  - the base policies is nearly done.  It does not import overrides for individual rules (firewall/IPS etc) or application types.
+For the export script, it will need another whole round of API queries - Policy.IPSrules, policy.fireawall rules etc.  Only consider this once the rest of the policy level imports is working.
 
 
 #>
@@ -22,7 +23,7 @@ $inputdir = "C:\scripts\log\export-DSM7"
 $dsmanager = "https://deepsec.tarala.me.uk:4119/"
 $logfilepath = "C:\scripts\log"
 $prefix = "tst1"
-#$loadfile = "C:\scripts\log\Output-DSPolicies-20200214065212-1.json"
+$loadfile = "C:\scripts\log\Output-DSPolicies-20200228053138-1.json"
 #end testing
 
 #enter the timeout for REST queries here
@@ -558,7 +559,7 @@ function replace-dslists
         if ($arrayidobjectlist -contains $listcheck)
             {
             #For Each elelment in the array, replace with the ID from the New DSM
-            $updatedlistID = $listIDArray | ForEach {$_ = $masteridmappings.($lookuptable.$listcheck).($_.ToString());$_} # this does not work.  $updatedlistID is always empty?
+            $updatedlistID = $listIDArray | ForEach {$_ = [int]$masteridmappings.$listcheck.($_.ToString());$_}
             #
             }
         else
@@ -603,13 +604,21 @@ function replace-dsnestedlists
                 ForEach ($subproperty in $subproperties)
                     {
                     #if ($lookuptable.$subproperty -eq "array")
-                    if ($arraysubobjectidlist -contains $subproperty)
+                    #if ($arraysubobjectidlist -contains $subproperty)
+                    if ($subproperty -eq "ruleIDs")
                         {
+                        #Its an array of firewall rules, IPS rules, IM or LI rules
                         $listcheck = $lookuptable.$objproperty #provide replace-dslists information on which object in $masteridmappings to search
                         $checkobject.$objproperty.$subproperty = replace-dslists -listcheck $listcheck -listIDArray $checkobject.$objproperty.$subproperty
                         }
+                    elseif ($subproperty -eq "applicationTypeIDs")
+                        {
+                        #It's an array of Application types for a policy
+                        $checkobject.$objproperty.$subproperty = replace-dslists -listcheck $lookuptable.$subproperty -listIDArray $checkobject.$objproperty.$subproperty
+                        }
                     elseif ($lookuptable.$subproperty)
                         {
+                        #it's not an array
                         $checkobject.$objproperty.$subproperty = replace-dslists -listcheck $subproperty -listID $checkobject.$objproperty.$subproperty
                         }
                     }
@@ -893,7 +902,9 @@ function Add-DsobjectsFromPScustom
 #Main body
 #Level One - Import objects with no links to other objects
 #Forget IM, LI and AC for now.
-if (! $loadfile){$loneobjects = @('directorylists','contexts','fileextensionlists','filelists','iplists','maclists','portlists','schedules','statefulconfigurations')}
+if (! $loadfile) {$loneobjects = @('directorylists','contexts','fileextensionlists','filelists','iplists','maclists','portlists','schedules','statefulconfigurations')}
+else {$loneobjects = $null}
+    
 #if (! $loadfile){$loneobjects = @('portlists')}
 ForEach ($uripart in $loneobjects)
     {
@@ -959,7 +970,7 @@ ForEach ($uripart in $lthreeobjects)
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
 
-
+<#
 if ($loadfile)
     {
     $importmappings = $inputdir + "\" + $loadfile
@@ -969,7 +980,7 @@ else
     {
     $mappingsobject = $masteridmappings | ConvertTo-Json | ConvertFrom-Json
     }
-
+#>
 
 
 
