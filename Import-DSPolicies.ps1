@@ -5,8 +5,8 @@ gets the value for the key.  using $masteridmappings.$uripart.number doesn't wor
 test: $masteridmappings.$uripart.'number'
 Layer One of the policies  - the base policies is nearly done.  It does not import overrides for individual rules (firewall/IPS etc) or application types.
 For the export script, it will need another whole round of API queries - Policy.IPSrules, policy.fireawall rules etc.  Only consider this once the rest of the policy level imports is working.
-
-
+Lines 832-835 - works for level 5-  intention is to make it work for all levels
+The function does not handle duplicate policy names - add the duplicate handline by adding the prefix.
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
@@ -778,11 +778,11 @@ function Add-DsobjectsFromPScustom
         Add-Content $logfile "Processing Add-DsobjectsFromPScustom URIpart =  $uripart, prefix = $prefix, level = $level"
         $dsobjuri = $dsmanager + 'api/' + $uripart + '/'
         $dssearchuri = $dsmanager + 'api/' + $uripart + '/search'
-        if (($level -gt 5) -or ($level -lt 1))
+        if (($level -gt 7) -or ($level -lt 1))
             {
-            write-host "level is not 1, 2 or 3"
+            write-host "level is not between 1 and 7 inclusive"
             Add-Content $logfile "Add-DsobjectsFromPScustom called with an invalid level. uripart = $uripart level = $level"
-            throw "Level is not 1, 2 or 3.  This function only works at 3 levels"
+            throw "Level is not between 1 and 7 inclusive.  This function only works at those levels"
             }
         }
     PROCESS
@@ -804,7 +804,7 @@ function Add-DsobjectsFromPScustom
             $ipscounter = 0
             ForEach ($oldipsrule in $oldstdipsrules)
                 {
-                $ipscounter
+                write-host $ipscounter
                 #then compare the objects
                 $newipsrule = $newobjects | where identifier -eq $oldipsrule.identifier
                 $originalid = $oldipsrule.ID
@@ -824,13 +824,25 @@ function Add-DsobjectsFromPScustom
             #create uripart array.  array to contain 
             ForEach ($ruleobject in $filteredrules)
                 {
-                replace-dsnestedlists $ruleobject
+                $updatedobject = replace-dsnestedlists $ruleobject
+                }
+            }
+        if ($level -gt 4)
+            {
+            #begin code being worked on
+            $filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.policies.keys
+
+            #end code being worked on
+            #create uripart array.  array to contain 
+            ForEach ($ruleobject in $filteredrules)
+                {
+                $updatedobject = replace-dsnestedlists $ruleobject
                 }
             }
         #Search the Fileterd rules (custom IPS rules in this case) individually.  There aren't lots of them so the multiple API calls isn't much of a time waster.
         ForEach ($ruleobject in $filteredrules)
             {
-            write-host $ruleobject
+            write-host $ruleobject.name
             write-host "------------------"
             $originalid = $ruleobject.ID
             $ruleobject.psobject.Properties.Remove('ID')
@@ -890,6 +902,7 @@ function Add-DsobjectsFromPScustom
                 $newID = $dsobject.ID
                 }
             $IDmappings.Add($originalid.ToString(),$newID.ToString())
+            #breakpoint
             }
         }
     END
@@ -970,17 +983,16 @@ ForEach ($uripart in $lthreeobjects)
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
 
-<#
+
 if ($loadfile)
     {
-    $importmappings = $inputdir + "\" + $loadfile
-    $mappingsobject = Get-Content -Raw -Path $importmappings | ConvertFrom-Json
+    $masteridmappings = Get-Content -Raw -Path $loadfile | ConvertFrom-Json
     }
 else
     {
-    $mappingsobject = $masteridmappings | ConvertTo-Json | ConvertFrom-Json
+    $masteridmappings = $masteridmappings | ConvertTo-Json -Depth 4 | ConvertFrom-Json
     }
-#>
+
 
 
 
@@ -996,9 +1008,6 @@ else
 #add the objects together using Merge-DSobjects.  Merge-dsobjects needs a uripart so it will be object.policies.hashtable
 #once complete, update $masteridmappings
 
-#lines 774- 778 - use the new function replace-dslists.  For level 4, the policy properties take the form policy.$uripart.property
-#e.g. for $object.policies.(1).antiMalware.realTimeScanConfigurationID will return the ID of the object to have its ID replaced for the first policy
-#check policies for all of the referred objects.  They are simply one level deeper than for L2 and L3 objects.
 if ($loadfile)
     {
     $masteridmappings = Get-Content -Raw -Path $loadfile | ConvertFrom-Json
@@ -1009,19 +1018,21 @@ $dsimportfile = $dsimportobject.VersionInfo.FileName
 Add-Content $logfile "DS Import file path = $dsimportfile"
 #load the Policies object from the filesystem
 $fullobjectfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
-#$objectfromfile = @{}
 if ($dsimportfile.count -eq 1)
     {
-    #$objectfromfile.$uripart += $fullobjectfromfile.$uripart | where parentID -eq $null
     $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level 4
+    $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
+    $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level 5
+    $noteproperty = $uripart + "Level2"
+    $masteridmappings | Add-Member -NotePropertyName $noteproperty -NotePropertyValue $idmappings
     }
 else
     {
     write-host "Directory does not have only one file $uripart" -ForegroundColor Yellow
     Add-Content $logfile "Directory does not have only one file for $uripart"
     }
-<#
-$masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
+
+
 
 ##############################################################
 
@@ -1036,4 +1047,3 @@ if ($global:irreconcilabledifferences.keys.Count -gt 0)
     $savediff = $global:irreconcilabledifferences | ConvertTo-Json
     Add-Content $difffile $savediff
     }
-#>
