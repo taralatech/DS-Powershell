@@ -6,7 +6,7 @@ and that functionality should be performed by another function.  There are three
 Layer One of the policies  - the base policies is nearly done.  It does not import overrides for individual rules (firewall/IPS etc) or application types.
 For the export script, it will need another whole round of API queries - Policy.IPSrules, policy.fireawall rules etc.  Only consider this once the rest of the policy level imports is working.
 Lines 832-835 - works for level 5-  intention is to make it work for all levels - see lines 1022 onwards
-Need to add the "compare the arrays" logic.  search the script for that.
+
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
@@ -663,6 +663,38 @@ function compare-dsobject
                         if ($subproperty -in $arraysubobjectidlist)
                             {
                             write-host "compare the arrays" -ForegroundColor Yellow
+                            start-sleep 1
+                            if ($importobject.$objproperty.$subproperty -and $newdsmobject.$objproperty.$subproperty)
+                                {
+                                $subpropcompare = Compare-Object -ReferenceObject $importobject.$objproperty.$subproperty -DifferenceObject $newdsmobject.$objproperty.$subproperty #using -property decides the objects are different if the contents of the array are in a different order
+                                if ($subpropcompare)
+                                    {
+                                    write-host "array subproperty $subproperty differs" -ForegroundColor Red
+                                    $identical = $false
+                                    start-sleep 1
+                                    }
+                                else
+                                    {
+                                    write-host "array subproperty $subproperty is the same" -ForegroundColor Cyan
+                                    }                               
+                                }
+                            elseif ($importobject.$objproperty.$subproperty -and !($newdsmobject.$objproperty.$subproperty))
+                                {
+                                write-host "array subproperty $subproperty exists on the import file but not the destination object" -ForegroundColor Red
+                                $identical = $false
+                                start-sleep 1
+                                }
+                            elseif (!($importobject.$objproperty.$subproperty) -and $newdsmobject.$objproperty.$subproperty)
+                                {
+                                write-host "array subproperty $subproperty exists on the destination object but not the import file" -ForegroundColor Red
+                                $identical = $false
+                                start-sleep 1
+                                }
+                            else
+                                {
+                                write-host "array subproperty $subproperty does not exist on either object.  They are the same"
+                                start-sleep 1
+                                }
                             }
                         else
                             {
@@ -1010,7 +1042,7 @@ function Add-DsobjectsFromPScustom
             #begin code being worked on
             $filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.policies.keys
             write-host "Beginning layer 2 policies" -ForegroundColor Yellow
-            start-sleep 5
+            start-sleep 1
             #end code being worked on
             #create uripart array.  array to contain 
             ForEach ($ruleobject in $filteredrules)
