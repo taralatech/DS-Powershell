@@ -3,10 +3,10 @@ Description here
 This scrips needs refactoring.  Originally it used the add-dsobjects function, however that was not suitable for IPS and policies.  add-dsobjectsfrompscustom was created
 to deal with the huge number of IPS rules without hammering the API.  Whilst writing that function, it became obvious that there was a lot of chescing/replacing of lists
 and that functionality should be performed by another function.  There are three completely different ways of adding objects the the new DSM as a result and its overcomplicated.
-Layer One of the policies  - the base policies is nearly done.  It does not import overrides for individual rules (firewall/IPS etc) or application types.
-For the export script, it will need another whole round of API queries - Policy.IPSrules, policy.fireawall rules etc.  Only consider this once the rest of the policy level imports is working.
-Lines 832-835 - works for level 5-  intention is to make it work for all levels - see lines 1022 onwards
 
+For the export script, it will need another whole round of API queries - Policy.IPSrules, policy.fireawall rules etc as overrides to individual rules aren't exported.
+
+Need to add logging to compare-dsobject
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
@@ -627,12 +627,6 @@ function compare-dsobject
         [pscustomobject]$importobject,
         [Parameter(mandatory=$true)]
         [pscustomobject]$newdsmobject
-        <#
-        [Parameter(mandatory=$true)]
-        [string]$uripart,
-        [Parameter(mandatory=$true)]
-        [int32]$level
-        #>
         )
     PROCESS
         {
@@ -663,7 +657,6 @@ function compare-dsobject
                         if ($subproperty -in $arraysubobjectidlist)
                             {
                             write-host "compare the arrays" -ForegroundColor Yellow
-                            start-sleep 1
                             if ($importobject.$objproperty.$subproperty -and $newdsmobject.$objproperty.$subproperty)
                                 {
                                 $subpropcompare = Compare-Object -ReferenceObject $importobject.$objproperty.$subproperty -DifferenceObject $newdsmobject.$objproperty.$subproperty #using -property decides the objects are different if the contents of the array are in a different order
@@ -671,7 +664,6 @@ function compare-dsobject
                                     {
                                     write-host "array subproperty $subproperty differs" -ForegroundColor Red
                                     $identical = $false
-                                    start-sleep 1
                                     }
                                 else
                                     {
@@ -682,18 +674,15 @@ function compare-dsobject
                                 {
                                 write-host "array subproperty $subproperty exists on the import file but not the destination object" -ForegroundColor Red
                                 $identical = $false
-                                start-sleep 1
                                 }
                             elseif (!($importobject.$objproperty.$subproperty) -and $newdsmobject.$objproperty.$subproperty)
                                 {
                                 write-host "array subproperty $subproperty exists on the destination object but not the import file" -ForegroundColor Red
                                 $identical = $false
-                                start-sleep 1
                                 }
                             else
                                 {
                                 write-host "array subproperty $subproperty does not exist on either object.  They are the same"
-                                start-sleep 1
                                 }
                             }
                         else
@@ -730,7 +719,6 @@ function compare-dsobject
                     }
             
                 }
-                ####################################################################
             }
         }
     END
@@ -968,6 +956,7 @@ function Add-DsobjectsFromPScustom
     # I'm trying to work out why level 3 objects don't need their references to other objects rewriting.  Is it a bug?
     #The prefix is used when a Duplicate object is found.  It's added to the new object.
     #Due to the new functios replace-dsnestedlists being created, I have added a new variable to track when this newer, simpler way of working is being used. $dslists = 1
+    #This function needs significant refactoring to just use replace-dsnestedlists, compare-dsobject and create-dsobject.  compare-andcreatedsobject is a badly written function.
     Param
         (
         [Parameter(mandatory=$true)]
@@ -987,11 +976,11 @@ function Add-DsobjectsFromPScustom
         Add-Content $logfile "Processing Add-DsobjectsFromPScustom URIpart =  $uripart, prefix = $prefix, level = $level"
         $dsobjuri = $dsmanager + 'api/' + $uripart + '/'
         $dssearchuri = $dsmanager + 'api/' + $uripart + '/search'
-        if (($level -gt 7) -or ($level -lt 1))
+        if (($level -gt 9) -or ($level -lt 1))
             {
-            write-host "level is not between 1 and 7 inclusive"
+            write-host "level is not between 1 and 9 inclusive"
             Add-Content $logfile "Add-DsobjectsFromPScustom called with an invalid level. uripart = $uripart level = $level"
-            throw "Level is not between 1 and 7 inclusive.  This function only works at those levels"
+            throw "Level is not between 1 and 9 inclusive.  This function only works at those levels"
             }
         }
     PROCESS
@@ -1039,11 +1028,8 @@ function Add-DsobjectsFromPScustom
             }
         if ($level -gt 4)
             {
-            #begin code being worked on
             $filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.policies.keys
-            write-host "Beginning layer 2 policies" -ForegroundColor Yellow
-            start-sleep 1
-            #end code being worked on
+            write-host "Beginning policies at level $level" -ForegroundColor Yellow
             #create uripart array.  array to contain 
             ForEach ($ruleobject in $filteredrules)
                 {
@@ -1258,10 +1244,17 @@ if ($dsimportfile.count -eq 1)
     {
     $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level 4
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
-    #add a loop here to work for any level
-    $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level 5
-    $noteproperty = $uripart + "Level2"
-    $masteridmappings | Add-Member -NotePropertyName $noteproperty -NotePropertyValue $idmappings
+    $policyloop = 5 #start at 5 as level 4 is already done
+    do
+        {
+        $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level $policyloop
+        $noteproperty = $uripart + "Level" + $policyloop
+        $masteridmappings | Add-Member -NotePropertyName $noteproperty -NotePropertyValue $idmappings
+        $policieslevel = "policiesLevel" + $policyloop
+        $masteridmappings.$policieslevel.Keys | foreach {$masteridmappings.policies.add($_, $masteridmappings.$policieslevel.$_)}
+        $policyloop++
+        }
+    until ($policyloop -ge 10)
     #end add the loop
     }
 else
