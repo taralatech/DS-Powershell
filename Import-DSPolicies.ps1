@@ -5,7 +5,8 @@ to deal with the huge number of IPS rules without hammering the API.  Whilst wri
 and that functionality should be performed by another function.  There are three completely different ways of adding objects the the new DSM as a result and its overcomplicated.
 
 For the export script, it will need another whole round of API queries - Policy.IPSrules, policy.fireawall rules etc as overrides to individual rules aren't exported.
-
+IPS rules - boost performance by creating a new hashtable that only has ID and Identifier and searching that?
+also, bug - If a custom IPS rule with same name exists, it doesn't append the prefix - why not?
 Need to add logging to compare-dsobject
 #>
 param (
@@ -19,11 +20,11 @@ param (
 
 
 #For testing
-$inputdir = "C:\scripts\log\export-DSM7"
+$inputdir = "C:\scripts\log\export-DSM"
 $dsmanager = "https://deepsec.tarala.me.uk:4119/"
 $logfilepath = "C:\scripts\log"
 $prefix = "tst1"
-$loadfile = "C:\scripts\log\Output-DSPolicies-20200228053138-1.json"
+#$loadfile = "C:\scripts\log\Output-DSPolicies-20200228053138-1.json"
 #end testing
 
 #enter the timeout for REST queries here
@@ -1003,6 +1004,7 @@ function Add-DsobjectsFromPScustom
             ForEach ($oldipsrule in $oldstdipsrules)
                 {
                 write-host $ipscounter
+                $ipscounter++
                 #then compare the objects
                 $newipsrule = $newobjects | where identifier -eq $oldipsrule.identifier
                 $originalid = $oldipsrule.ID

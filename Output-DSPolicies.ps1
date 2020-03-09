@@ -3,18 +3,20 @@ Description here
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
-    [Parameter(Mandatory=$true)][string]$outputdir,
-    [Parameter(Mandatory=$true)][string]$dsmanager,
-    [Parameter(Mandatory=$true)][string]$logfilepath
+    [Parameter(Mandatory=$false)][string]$outputdir,
+    [Parameter(Mandatory=$false)][string]$dsmanager,
+    [Parameter(Mandatory=$false)][string]$logfilepath
 )
 
 #enter the timeout for REST queries here
 $resttimeout = 30
 #Enter the delay in seconds if there are API errors (such as "too many API requests")
-$backoffdelay = 0
+$backoffdelay = 8
 #URL must include HTTPS:// and finish with a /
 #e.g. $DSmanager = "https://app.deepsecurity.trendmicro.com/"
-#$dsmanager = "https://app.deepsecurity.trendmicro.com/"
+$dsmanager = "https://sr-dse1.home.tarala.me.uk/"
+$outputdir = "C:\scripts\log\export-DSM\"
+$logfilepath = "C:\scripts\log\"
 $date = ( get-date ).ToString('yyyyMMddhhmmss')
 $logfile = New-Item -type file "$logfilepath\Output-DSPolicies-$date.txt"
 if ($outputdir -eq "")
@@ -41,13 +43,15 @@ Function Get-DSConfigObject
         [Parameter(mandatory=$true)]
         [int32]$objid,
         [Parameter(mandatory=$true)]
-        [string]$uripart
+        [string]$uripart,
+        [Parameter(mandatory=$false)]
+        [string]$furtheruripart
         )
     BEGIN
         {
         if ($uripart -eq 'policies')
             {
-            $dsobjuri = $dsmanager + 'api/' + $uripart + '/' + $objid + '?overrides=true'
+            $dsobjuri = $dsmanager + 'api/' + $uripart + '/' + $objid + '/' + $furtheruripart + '?overrides=true'
             write-host "Object is a policy - requesting overrides only"
             }
         else
@@ -177,9 +181,6 @@ Function Get-AllObjectIDs
             {
             $geturi = $dsmanager + 'api/' + $uripart + '/'
             }
-
-
-        #$geturi = $dsmanager + 'api/' + $uripart + '/'
         }
     PROCESS
         {
@@ -269,7 +270,8 @@ Function Export-AllDSobjectsAsSingleFile
     [CmdletBinding()]
     Param
         (
-        [string]$uripart
+        [Parameter(mandatory=$true)][string]$uripart,
+        [Parameter(mandatory=$false)][string]$furtheruripart
         )
     BEGIN
         {
@@ -278,7 +280,18 @@ Function Export-AllDSobjectsAsSingleFile
     PROCESS
         {
         $dsobjects = Get-AllObjectIDs $uripart
-        $dsobjpath = "$outputdir\$uripart"
+        if ($furtheruripart)
+            {
+            $alldsobjects = [pscustomobject]@{}
+            foreach ($singleobject in $dsobjects.$uripart)
+                {
+                $individualobject = Get-DSConfigObject -objid $singleobject.ID -uripart $uripart -furtheruripart $furtheruripart
+                $alldsobjects | Add-Member -MemberType NoteProperty -Name $singleobject.ID -Value $individualobject
+                }
+            $dsobjects = $alldsobjects
+            }
+        $subpath = $uripart + $furtheruripart
+        $dsobjpath = "$outputdir\$subpath"
         New-Item -ItemType directory -Path $dsobjpath
         write-host "URIpart is is: $uripart (Export-AllDSobjectsAsSingleFile)" -ForegroundColor Cyan
         $fullfile = "$dsobjpath\Output-DSPolicies-$uripart.json"
@@ -305,12 +318,10 @@ else
     write-host "path $outputdir does not exist"
     New-Item -ItemType directory -Path $outputdir
     }
-
 Export-AllDSobjectsOfType 'antimalwareconfigurations'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'directorylists'
 Start-Sleep $backoffdelay
-#Export-AllDSobjectsOfType 'policies'
 Export-AllDSobjectsAsSingleFile 'policies'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'fileextensionlists'
@@ -331,15 +342,18 @@ Export-AllDSobjectsOfType 'contexts'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'statefulconfigurations'
 Start-Sleep $backoffdelay
-#Export-AllDSobjectsOfType 'integritymonitoringrules'
 Export-AllDSobjectsAsSingleFile  'integritymonitoringrules'
 Start-Sleep $backoffdelay
-#Export-AllDSobjectsOfType 'loginspectionrules'
 Export-AllDSobjectsAsSingleFile 'loginspectionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsAsSingleFile 'intrusionpreventionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'applicationtypes'
+
+Export-AllDSobjectsAsSingleFile 'policies' 'firewall/rules'
+Export-AllDSobjectsAsSingleFile 'policies' 'intrusionprevention/rules'
+Export-AllDSobjectsAsSingleFile 'policies' 'integritymonitoring/rules'
+Export-AllDSobjectsAsSingleFile 'policies' 'loginspection/rules'
 
 pause
 #Export-AllDSobjectsAsSingleFile 'policies'
