@@ -23,7 +23,7 @@ param (
 $inputdir = "C:\scripts\log\export-DSM"
 $dsmanager = "https://deepsec.tarala.me.uk:4119/"
 $logfilepath = "C:\scripts\log"
-$prefix = "tst1"
+$prefix = "tst2"
 #$loadfile = "C:\scripts\log\Output-DSPolicies-20200228053138-1.json"
 #end testing
 
@@ -269,7 +269,7 @@ Function Get-DSObjects
         }
     PROCESS
         {
-        $startid = 1
+        $startid = 0
         $dsobjects = $null
         do
             {
@@ -282,7 +282,7 @@ Function Get-DSObjects
                                             }
                         "sortByObjectID" = "true"
                       } | ConvertTo-Json
-            if ($startid -eq 1)
+            if ($startid -eq 0)
                 {
                 $dsobjects = Call-Dsapi -headers $headers -method Post -Body $json -uri $geturi -resttimeout $resttimeout -backoffdelay $backoffdelay
                 $dsfullobjects = $dsobjects
@@ -290,6 +290,7 @@ Function Get-DSObjects
             else
                 {
                 $dsobjects = Call-Dsapi -headers $headers -method Post -Body $json -uri $geturi -resttimeout $resttimeout -backoffdelay $backoffdelay
+                write-host "merge $dsobjects $dsfullobjects $uripart" -ForegroundColor Yellow -BackgroundColor Blue
                 $dsfullobjects = Merge-DSobjects $dsobjects $dsfullobjects $uripart
                 }
             write-host "$startid - start id"
@@ -647,7 +648,7 @@ function compare-dsobject
             $identical = $true
             ForEach ($objproperty in $objproperties)
                 {
-                write-host "checking $objproperty"
+                #write-host "checking $objproperty"
                 if($objproperty -in $nestedobjectpropertylist)
                     {
                     #loop through subproperties
@@ -705,13 +706,13 @@ function compare-dsobject
                         {
                         $identical = $false
                         write-host "Objects to be compared have different properties. New Object ID: $newID Imported Object name:" $importobject.name -ForegroundColor Red
-                        write-host "differing property is: $objproperty old object: $importobject.$objproperty new object: $newdsmobject.$objproperty" -ForegroundColor Red
+                        write-host "differing property is: $objproperty" -ForegroundColor Red
                         $logcontent = "DUPLICATE_DIFFER:  Objects have different properties. New Object ID: $newID Imported Object name:" + $importobject.name + "Property:" + $objproperty
                         Add-Content $logfile $logcontent
                         }
                     else
                         {
-                        write-host "property $objproperty is identical"
+                        #write-host "property $objproperty is identical"
                         }
                     }
                 else
@@ -724,7 +725,7 @@ function compare-dsobject
         }
     END
         {
-        write-host "end compare-dsobject"
+        #write-host "end compare-dsobject"
         return $identical
         }
     }
@@ -989,17 +990,50 @@ function Add-DsobjectsFromPScustom
         #Importobjects is the pscustomobject loaded from the file and passed into this function
         #$objectfromdsm is the full set of objects on the new DSM to be compared to
         $objectfromdsm = Get-DSObjects $dsmanager $uripart $resttimeout $backoffdelay -parameters '?overrides=true'
+        if ($level -eq 2)
+            {
+            $filteredrules = $importobjects.$uripart
+            ForEach ($ruleobject in $filteredrules)
+                {
+                $updatedobject = replace-dsnestedlists $ruleobject
+                }
+            $dslists = 1
+            }
         if ($level -eq 3)
             {
             #prepare variables for easy comparison
             $oldobjects = $importobjects.$uripart
             $newobjects = $objectfromdsm.$uripart
+            $oldipshash = @{}
+            $newipshash = @{}
             #lookup the new rule ID's
             add-content $logfile "Processing IPS rules"
             add-content $logfile "---------------------------------------------------------"
             #Filter out custom IPS rules.  For the Trend IPS rules we just need to map the old ID's to the new ID's
             $oldstdipsrules = $oldobjects | where type
             write-host "There are $oldstdipsrules.count IPS Rules"
+            #####################Begin much faster code
+            ForEach ($oldipsrule in $oldstdipsrules)
+	            {
+	            $oldipshash.Add($oldipsrule.identifier, $oldipsrule.ID)
+	            }
+            $newipsrules = $newobjects | where type
+            ForEach ($newipsrule in $newipsrules)
+            	{
+            	$newipshash.Add($newipsrule.identifier, $newipsrule.ID)
+            	}
+            $counter = 1
+            ForEach ($ruletoadd in $oldipshash.keys)
+            	{
+            	$counter++
+            	write-host $counter
+            	$newipsruleID = $newipshash.$ruletoadd
+            	$oldipsruleid = $oldipshash.$ruletoadd
+            	$IDmappings.Add($oldipsruleid.ToString(),$newipsruleID.ToString())
+            	}
+            #####################end much faster code
+            <#
+            #####################begin removed slower code
             $ipscounter = 0
             ForEach ($oldipsrule in $oldstdipsrules)
                 {
@@ -1015,8 +1049,11 @@ function Add-DsobjectsFromPScustom
                 #update masterIDmappings
                 $IDmappings.Add($originalid.ToString(),$newID.ToString())
                 }
+            ########################End removed slower code
+            #>
             #Now to the lookup/add where necessary only for th custom IPS rules
             $filteredrules = $oldobjects | where template
+            $dslists = 1
             }
         if ($level -eq 4)
             {
@@ -1162,7 +1199,8 @@ ForEach ($uripart in $loneobjects)
 #Firewall rules (port lists, ip lists, mac lists)
 #IPS application types (port lists)
 #AM scan configs (File, extension and directory lists)
-if (! $loadfile) {$ltwoobjects = @('firewallrules','applicationtypes','antimalwareconfigurations')}
+<#
+if (! $loadfile) {$ltwoobjects = @('firewallrules','antimalwareconfigurations')}
 #
 ForEach ($uripart in $ltwoobjects)
     {
@@ -1178,6 +1216,29 @@ ForEach ($uripart in $ltwoobjects)
         }
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
+    #>
+#Level 2 part 2 - applicationtypes are now exported as a signle file
+if (! $loadfile) {$ltwoobjects = @('firewallrules','antimalwareconfigurations','applicationtypes')}
+ForEach ($uripart in $ltwoobjects)
+    {
+    $dsimportobject = get-dsfilelist $inputdir $uripart
+    $dsimportfile = $dsimportobject.VersionInfo.FileName
+    Add-Content $logfile "DS Import file path = $dsimportfile"
+    #load the IPS object from the filesystem
+    $objectfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
+    if ($dsimportobject.count -eq 1)
+        {
+        $idmappings = Add-DsobjectsFromPScustom -importobjects $objectfromfile -uripart $uripart -prefix $prefix -level 2
+        }
+    else
+        {
+        write-host "Directory does not have only one file $uripart" -ForegroundColor Yellow
+        Add-Content $logfile "Directory does not have only one file for $uripart"
+        }
+    $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
+    }
+
+
 
 
 
@@ -1280,3 +1341,4 @@ if ($global:irreconcilabledifferences.keys.Count -gt 0)
     $savediff = $global:irreconcilabledifferences | ConvertTo-Json
     Add-Content $difffile $savediff
     }
+Write-host "-----------------------------------------Complete-----------------------------------------------" -ForegroundColor DarkBlue -BackgroundColor White

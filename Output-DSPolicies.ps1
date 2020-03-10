@@ -11,7 +11,7 @@ param (
 #enter the timeout for REST queries here
 $resttimeout = 30
 #Enter the delay in seconds if there are API errors (such as "too many API requests")
-$backoffdelay = 8
+$backoffdelay = 1
 #URL must include HTTPS:// and finish with a /
 #e.g. $DSmanager = "https://app.deepsecurity.trendmicro.com/"
 $dsmanager = "https://sr-dse1.home.tarala.me.uk/"
@@ -125,7 +125,7 @@ Function Get-AllObjectIDslarge
         }
     PROCESS
         {
-        $startid = 1
+        $startid = 0
         $dsobjects = $null
         do
             {
@@ -138,7 +138,7 @@ Function Get-AllObjectIDslarge
                                             }
                         "sortByObjectID" = "true"
                       } | ConvertTo-Json
-            if ($startid -eq 1)
+            if ($startid -eq 0)
                 {
                 $dsobjects = Invoke-RestMethod -Headers $headers -method Post -Uri $geturi -body $json -TimeoutSec $resttimeout
                 $dsfullobjects = $dsobjects
@@ -318,7 +318,7 @@ else
     write-host "path $outputdir does not exist"
     New-Item -ItemType directory -Path $outputdir
     }
-Export-AllDSobjectsOfType 'antimalwareconfigurations'
+Export-AllDSobjectsAsSingleFile 'antimalwareconfigurations'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'directorylists'
 Start-Sleep $backoffdelay
@@ -330,7 +330,7 @@ Export-AllDSobjectsOfType 'filelists'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'schedules'
 Start-Sleep $backoffdelay
-Export-AllDSobjectsOfType 'firewallrules'
+Export-AllDSobjectsAsSingleFile 'firewallrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsOfType 'iplists'
 Start-Sleep $backoffdelay
@@ -348,7 +348,8 @@ Export-AllDSobjectsAsSingleFile 'loginspectionrules'
 Start-Sleep $backoffdelay
 Export-AllDSobjectsAsSingleFile 'intrusionpreventionrules'
 Start-Sleep $backoffdelay
-Export-AllDSobjectsOfType 'applicationtypes'
+#Export-AllDSobjectsOfType 'applicationtypes'
+Export-AllDSobjectsAsSingleFile 'applicationtypes'
 
 Export-AllDSobjectsAsSingleFile 'policies' 'firewall/rules'
 Export-AllDSobjectsAsSingleFile 'policies' 'intrusionprevention/rules'
