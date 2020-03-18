@@ -1,4 +1,4 @@
-# Scripts to report on and Administer Deep Secuirty Managers
+# Scripts to report on and administer Deep Secuirty Managers
 
 ## Assign-IPSrulestopolicy.ps1
 
