@@ -1,12 +1,8 @@
 ﻿<#
 Description here
-This scrips needs refactoring.  Originally it used the add-dsobjects function, however that was not suitable for IPS and policies.  add-dsobjectsfrompscustom was created
-to deal with the huge number of IPS rules without hammering the API.  Whilst writing that function, it became obvious that there was a lot of chescing/replacing of lists
-and that functionality should be performed by another function.  There are three completely different ways of adding objects the the new DSM as a result and its overcomplicated.
-
-For the export script, it will need another whole round of API queries - Policy.IPSrules, policy.fireawall rules etc as overrides to individual rules aren't exported.
-IPS rules - boost performance by creating a new hashtable that only has ID and Identifier and searching that?
-also, bug - If a custom IPS rule with same name exists, it doesn't append the prefix - why not?
+This scrips does not check fro rule overrides on the target DSM at all.  It simply adds overrides present in the imported objects.  This is only a problem is somehow identical policies exist on the
+target DSM where the only difference is rule overrides.  The intention of this script is to import config to a freshly built dsm so this
+should never happen unless in the source DSM the default policies have been modified with rule overrides only.  If that's the case, either delete those policies or start from scratch and don't use this script.
 Need to add logging to compare-dsobject
 #>
 param (
@@ -24,7 +20,7 @@ $inputdir = "C:\scripts\log\export-DSM"
 $dsmanager = "https://deepsec.tarala.me.uk:4119/"
 $logfilepath = "C:\scripts\log"
 $prefix = "tst2"
-#$loadfile = "C:\scripts\log\Output-DSPolicies-20200228053138-1.json"
+$loadfile = "C:\scripts\log\Output-DSPolicies-20200310062411-1.json"
 #end testing
 
 #enter the timeout for REST queries here
@@ -298,8 +294,7 @@ Function Get-DSObjects
             write-host "$dsobjectscount - DSobjectscount"
             $startid = $startid + 1000
             }
-        #until ($dsobjects.$uripart.Count -eq 0)
-        until ($dsobjects.$uripart.Count -lt 999)
+        until ($dsobjects.$uripart.Count -lt 1000)
         }
     END
         {
@@ -337,6 +332,7 @@ function Get-DSfilelist
 
 function compare-andcreatedsobject
     {
+    #This function in now only used for level 1 objects.  ideally it will be removed completely.
     #compare $importobject to $newdsmobject - if they are the same, return only the new DSM object ID.
     #If they are different, create a new object with the prefix and return the new object ID
     [CmdletBinding()]
@@ -540,7 +536,7 @@ function compare-andcreatedsobject
 
 function create-dsobject
     {
-    #Checks for an identically namked object on the DSM.  If the identical object exists, adds the prefix to the name of the object and searches again.
+    #Checks for an identically named object on the DSM.  If the identical object exists, adds the prefix to the name of the object and searches again.
     #If there is an Identical object, assumes they are the same as this should not happen unless this script is being ran against the "new" DS
     #multiple times which shouldn't happen
     [CmdletBinding()]
@@ -752,7 +748,7 @@ function replace-dslists
         }
     PROCESS
         {
-        if ($arrayidobjectlist -contains $listcheck)
+        if (($arrayidobjectlist -contains $listcheck) -and $listIDArray) #Policy rule overrides also use the same $listcheck as arrays of rules, however the overrides are only done one rule at a time
             {
             #For Each elelment in the array, replace with the ID from the New DSM
             $updatedlistID = $listIDArray | ForEach {$_ = [int]$masteridmappings.$listcheck.($_.ToString());$_}
@@ -978,11 +974,11 @@ function Add-DsobjectsFromPScustom
         Add-Content $logfile "Processing Add-DsobjectsFromPScustom URIpart =  $uripart, prefix = $prefix, level = $level"
         $dsobjuri = $dsmanager + 'api/' + $uripart + '/'
         $dssearchuri = $dsmanager + 'api/' + $uripart + '/search'
-        if (($level -gt 9) -or ($level -lt 1))
+        if (($level -gt 11) -or ($level -lt 1))
             {
-            write-host "level is not between 1 and 9 inclusive"
+            write-host "level is not between 1 and 11 inclusive"
             Add-Content $logfile "Add-DsobjectsFromPScustom called with an invalid level. uripart = $uripart level = $level"
-            throw "Level is not between 1 and 9 inclusive.  This function only works at those levels"
+            throw "Level is not between 1 and 11 inclusive.  This function only works at those levels"
             }
         }
     PROCESS
@@ -1051,11 +1047,11 @@ function Add-DsobjectsFromPScustom
                 }
             ########################End removed slower code
             #>
-            #Now to the lookup/add where necessary only for th custom IPS rules
+            #Now to the lookup/add where necessary only for the custom IPS rules
             $filteredrules = $oldobjects | where template
             $dslists = 1
             }
-        if ($level -eq 4)
+        if ($level -eq 5)
             {
             $filteredrules = $importobjects.$uripart | where parentID -eq $null
             #create uripart array.  array to contain 
@@ -1065,7 +1061,7 @@ function Add-DsobjectsFromPScustom
                 }
             $dslists = 1 #mark that the lists have already been replaced
             }
-        if ($level -gt 4)
+        if ($level -gt 5)
             {
             $filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.policies.keys
             write-host "Beginning policies at level $level" -ForegroundColor Yellow
@@ -1076,6 +1072,7 @@ function Add-DsobjectsFromPScustom
                 }
             $dslists = 1 #mark that the lists have already been replaced
             }
+
         #Search the Fileterd rules individualy.  There aren't lots of them so the multiple API calls isn't much of a time waster.
         ForEach ($ruleobject in $filteredrules)
             {
@@ -1084,6 +1081,7 @@ function Add-DsobjectsFromPScustom
             $originalid = $ruleobject.ID
             $ruleobject.psobject.Properties.Remove('ID')
             #check if object with same name exists
+            <#
             #############################################################################Second API call - not needed
             $searchname = $ruleobject.name
             $searchjson = @{
@@ -1096,6 +1094,7 @@ function Add-DsobjectsFromPScustom
                         "sortByObjectID" = "true"
                       } | ConvertTo-Json
             #$searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay #why call the API twice?$ob
+            #>
             #Above replaced with below to avoid unnecessary API query
             
             $searchobject.$uripart = $objectfromdsm.$uripart | where name -EQ $ruleobject.name # this is maintained to avoid refactoring rest of code for now
@@ -1172,14 +1171,114 @@ function Add-DsobjectsFromPScustom
         }
     }
 
+function update-policyoverrides
+	{
+    [CmdletBinding()]
+    #Function Checks for/adds rule overrides to policies.
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [pscustomobject]$importobjects,
+        [Parameter(mandatory=$true)]
+        [string]$uripart
+        )
+    BEGIN
+        {
+        $updatedobjects = [pscustomobject]@{}
+        }
+    PROCESS
+        {
+        #strip away the empty policies $importobjects
+        ForEach ($importobject in $importobjects.psobject.Properties)
+            {
+            if ($importobject.Value.$uripart.count -eq 0)
+                {
+                $importobjects.psobject.Properties.Remove($importobject.name)
+                }
+            else
+                {
+                write-host "Update the Object"
+                ForEach ($ruleobject in $importobject.Value.$uripart)
+                    {
+                    #Check whether property is one to be replaced
+                    ForEach ($ruleproperty in $ruleobject.psobject.Properties)
+                        {
+                        if ($lookuptable.($ruleproperty.name))
+                            {
+                            #update the ruleID's
+                            write-host "old value " $ruleproperty.Value
+                            $ruleproperty.Value = $masteridmappings.($lookuptable.($ruleproperty.name)).($ruleproperty.Value)
+                            write-host "new value " $ruleproperty.Value
+                            }
+                        elseif ($ruleproperty.Name -eq "ID")
+                            {
+                            write-host "update the ID"
+                            $ruleproperty.Value = $masteridmappings.$uripart.($ruleproperty.Value)
+                            }
+                        }
+                    }
+                write-host "Old Policy ID " $importobject.Name
+                #$importobject.Name = $masteridmappings.policies.($importobject.Name)
+                $updatedobjects | Add-Member -MemberType NoteProperty -Name $masteridmappings.policies.($importobject.Name) -Value $importobject.value
+                #update the policyID
+                write-host "New Policy ID " $masteridmappings.policies.($importobject.Name)
+                }
+            }
+        write-host "Policy Override object update for " $uripart "Completed"
+        start-sleep 1
 
+        }
+    END
+        {
+        return $updatedobjects
+        }
+    }
+
+function add-policyoverrides
+	{
+    [CmdletBinding()]
+    #Function Checks for/adds rule overrides to policies.
+    Param
+        (
+        [Parameter(mandatory=$true)]
+        [pscustomobject]$importobjects,
+        [Parameter(mandatory=$true)]
+        [string]$uripart
+        )
+    BEGIN
+        {
+        }
+    PROCESS
+        {
+        #strip away the empty policies $importobjects
+        ForEach ($importobject in $importobjects.psobject.Properties)
+            {
+            write-host "Update the Object"
+            ForEach ($ruleobject in $importobject.Value.$uripart)
+                {
+                #Check whether property is one to be replaced
+                $ruleobjectwithoutID = $ruleobject.psobject.copy()
+                $ruleobjectwithoutID.psobject.Properties.Remove("ID")
+                $body = $ruleobjectwithoutID | ConvertTo-Json
+                $uri = $dsmanager + 'api/policies/' + $importobject.Name + '/' + $uripart.replace("rules","") + '/rules/' + $ruleobject.ID
+                $newobject = Call-Dsapi -headers $headers -method Post -Body $body -uri $uri -resttimeout $resttimeout -backoffdelay $backoffdelay  
+                }
+            
+            }
+        write-host "Policy Override object add for " $uripart "Completed"
+        start-sleep 1
+
+        }
+    END
+        {
+        return $updatedobjects
+        }
+    }
 #Main body
 #Level One - Import objects with no links to other objects
 #Forget IM, LI and AC for now.
 if (! $loadfile) {$loneobjects = @('directorylists','contexts','fileextensionlists','filelists','iplists','maclists','portlists','schedules','statefulconfigurations')}
 else {$loneobjects = $null}
-    
-#if (! $loadfile){$loneobjects = @('portlists')}
 ForEach ($uripart in $loneobjects)
     {
     $dsimportobjects = get-dsfilelist $inputdir $uripart
@@ -1278,11 +1377,8 @@ else
     $masteridmappings = $masteridmappings | ConvertTo-Json -Depth 4 | ConvertFrom-Json
     }
 
-
-
-
-
-#Level 4 - Import the policies
+#Skip level 4 - this will be used for the overrides for rules attaches to policies
+#Level 5 - Import the policies
 
 #Import all policies into a PSCustomObject
 #work through the object and create a hashtable where each policy OLD ID is paired with it's "level" Base policies are level 1, children of those are level 2, etc  detect when there are no more polieies (e.g. nothing beyond level 3)
@@ -1292,7 +1388,7 @@ else
 #send split pscustomobject to $policyIDmappings = new-dsobjectfrompscustom
 #add the objects together using Merge-DSobjects.  Merge-dsobjects needs a uripart so it will be object.policies.hashtable
 #once complete, update $masteridmappings
-
+<#
 if ($loadfile)
     {
     $masteridmappings = Get-Content -Raw -Path $loadfile | ConvertFrom-Json
@@ -1305,9 +1401,9 @@ Add-Content $logfile "DS Import file path = $dsimportfile"
 $fullobjectfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
 if ($dsimportfile.count -eq 1)
     {
-    $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level 4
+    $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level 5
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
-    $policyloop = 5 #start at 5 as level 4 is already done
+    $policyloop = 6 #start at 6 as level 5 is already done
     do
         {
         $idmappings = Add-DsobjectsFromPScustom -importobjects $fullobjectfromfile -uripart $uripart -prefix $prefix -level $policyloop
@@ -1317,8 +1413,7 @@ if ($dsimportfile.count -eq 1)
         $masteridmappings.$policieslevel.Keys | foreach {$masteridmappings.policies.add($_, $masteridmappings.$policieslevel.$_)}
         $policyloop++
         }
-    until ($policyloop -ge 10)
-    #end add the loop
+    until ($policyloop -ge 11)
     }
 else
     {
@@ -1326,8 +1421,40 @@ else
     Add-Content $logfile "Directory does not have only one file for $uripart"
     }
 
+#Level 4 - Import the policy rule overrides for FW, IPS, IM and LI
+#>
 
 
+$lfourobjects = @('policiesfirewall','policiesintegritymonitoring','policiesintrusionprevention','policiesloginspection')
+$lfourmappings = @{
+'policiesfirewall' = 'firewallrules'
+'policiesintegritymonitoring' = 'integritymonitoringrules'
+'policiesintrusionprevention' = 'intrusionpreventionrules'
+'policiesloginspection' = 'loginspectionrules'
+}
+ForEach ($uripart in $lfourobjects)
+    {
+    $subpath = $uripart + "\rules\"
+    $dsimportobject = get-dsfilelist $inputdir $subpath
+    $dsimportfile = $dsimportobject.VersionInfo.FileName
+    Add-Content $logfile "DS Import file path = $dsimportfile"
+    #load the object from the filesystem
+    $objectfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
+    if ($dsimportobject.count -eq 1)
+        {
+        #$idmappings = Add-DsobjectsFromPScustom -importobjects $objectfromfile -uripart $uripart -prefix $prefix -level 4 -furtheruripart $lfourmappings.$uripart
+        #new process is too different to add-dsobjectsfrompscustom
+        $updatedoverrides = update-policyoverrides -importobjects $objectfromfile -uripart $lfourmappings.$uripart
+        write-host "break"
+        add-policyoverrides -importobjects $updatedoverrides -uripart $lfourmappings.$uripart
+        }
+    else
+        {
+        write-host "Directory does not have only one file $uripart" -ForegroundColor Yellow
+        Add-Content $logfile "Directory does not have only one file for $uripart"
+        }
+    #
+    }
 ##############################################################
 
 #save the mapping table to disk
