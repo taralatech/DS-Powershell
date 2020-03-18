@@ -1,9 +1,19 @@
 ﻿<#
-Description here
-This scrips does not check fro rule overrides on the target DSM at all.  It simply adds overrides present in the imported objects.  This is only a problem is somehow identical policies exist on the
+How to use:
+.\import-dspolicies.ps1 <API key> <input directory> <ds maanger URL> <Log file full path> <prefix>
+e.g.
+.\import-dspolicies.ps1 "dfsdfabksdflkasfdhbk23-asdgdagfba" "c:\dsmanageroutput\mydsmanager\" "Https://newdsm.mydomain.com:4119" "C:\logfiles\" "Duplicate"
+
+The prefix is the string of characters the script adds to policy names if an identically named policy is found on the new DSM with different settings.
+
+Known Issues:
+This scrips does not check for rule overrides on the target DSM at all.  It simply adds overrides present in the imported objects.  This is only a problem is somehow identical policies exist on the
 target DSM where the only difference is rule overrides.  The intention of this script is to import config to a freshly built dsm so this
 should never happen unless in the source DSM the default policies have been modified with rule overrides only.  If that's the case, either delete those policies or start from scratch and don't use this script.
-Need to add logging to compare-dsobject
+
+Logging is incomplete
+
+When comparing IPS rules, exceptions may occur due to identical keys.  This is safe to ignore and the script will continue running.
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,

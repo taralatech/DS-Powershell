@@ -1,5 +1,8 @@
 ﻿<#
-Description here
+Run this script by typing:
+.\Output-dspolicies.ps1 <API KEY> <full path to output directory> <url for DS manager> <full path to log directory>
+e.g. 
+.\Output-dspolicies.ps1 "shfsdajlkdajbk111444234234234" "c:\dsmanageroutput\mydsmanager\" "https://dsm.mydomain.com:4119/" "C:\logfiles\"
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
@@ -11,12 +14,12 @@ param (
 #enter the timeout for REST queries here
 $resttimeout = 30
 #Enter the delay in seconds if there are API errors (such as "too many API requests")
-$backoffdelay = 1
+$backoffdelay = 15
 #URL must include HTTPS:// and finish with a /
 #e.g. $DSmanager = "https://app.deepsecurity.trendmicro.com/"
-$dsmanager = "https://sr-dse1.home.tarala.me.uk/"
-$outputdir = "C:\scripts\log\export-DSM\"
-$logfilepath = "C:\scripts\log\"
+#$dsmanager = "https://sr-dse1.home.tarala.me.uk/"
+#$outputdir = "C:\scripts\log\export-DSM\"
+#$logfilepath = "C:\scripts\log\"
 $date = ( get-date ).ToString('yyyyMMddhhmmss')
 $logfile = New-Item -type file "$logfilepath\Output-DSPolicies-$date.txt"
 if ($outputdir -eq "")
