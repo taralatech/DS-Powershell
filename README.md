@@ -16,4 +16,5 @@ restore setttings to a new DSM/DSaaS that has been backed up using Output-DSPoli
 
 Back up DSM/DSaaS to a file system to be used by Import-DSPolicies.ps1
 
-## csv files are example files for Assign-IPSrulestopolicy.ps1 Assign-LegacyIPSrules.ps1
+## csv files
+Example files for Assign-IPSrulestopolicy.ps1 Assign-LegacyIPSrules.ps1
