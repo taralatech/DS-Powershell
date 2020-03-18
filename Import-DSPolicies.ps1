@@ -7,20 +7,20 @@ Need to add logging to compare-dsobject
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
-    [Parameter(Mandatory=$false)][string]$inputdir,
-    [Parameter(Mandatory=$false)][string]$dsmanager,
-    [Parameter(Mandatory=$false)][string]$logfilepath,
-    [Parameter(Mandatory=$false)][string]$prefix,
+    [Parameter(Mandatory=$true)][string]$inputdir,
+    [Parameter(Mandatory=$true)][string]$dsmanager,
+    [Parameter(Mandatory=$true)][string]$logfilepath,
+    [Parameter(Mandatory=$true)][string]$prefix,
     [Parameter(Mandatory=$false)][string]$loadfile
 )
 
 
 #For testing
-$inputdir = "C:\scripts\log\export-DSM"
-$dsmanager = "https://deepsec.tarala.me.uk:4119/"
-$logfilepath = "C:\scripts\log"
-$prefix = "tst2"
-$loadfile = "C:\scripts\log\Output-DSPolicies-20200310062411-1.json"
+#$inputdir = "C:\scripts\log\export-DSM"
+#$dsmanager = "https://deepsec.tarala.me.uk:4119/"
+#$logfilepath = "C:\scripts\log"
+#$prefix = "tst2"
+#$loadfile = "C:\scripts\log\Output-DSPolicies-20200310062411-1.json"
 #end testing
 
 #enter the timeout for REST queries here
@@ -660,7 +660,7 @@ function compare-dsobject
                                 $subpropcompare = Compare-Object -ReferenceObject $importobject.$objproperty.$subproperty -DifferenceObject $newdsmobject.$objproperty.$subproperty #using -property decides the objects are different if the contents of the array are in a different order
                                 if ($subpropcompare)
                                     {
-                                    write-host "array subproperty $subproperty differs" -ForegroundColor Red
+                                    write-host "array subproperty $subproperty differs" -ForegroundColor Magenta
                                     $identical = $false
                                     }
                                 else
@@ -701,8 +701,8 @@ function compare-dsobject
                     if ($propcompare)
                         {
                         $identical = $false
-                        write-host "Objects to be compared have different properties. New Object ID: $newID Imported Object name:" $importobject.name -ForegroundColor Red
-                        write-host "differing property is: $objproperty" -ForegroundColor Red
+                        write-host "Objects to be compared have different properties. New Object ID: $newID Imported Object name:" $importobject.name -ForegroundColor Magenta
+                        write-host "differing property is: $objproperty" -ForegroundColor Magenta
                         $logcontent = "DUPLICATE_DIFFER:  Objects have different properties. New Object ID: $newID Imported Object name:" + $importobject.name + "Property:" + $objproperty
                         Add-Content $logfile $logcontent
                         }
@@ -1007,7 +1007,7 @@ function Add-DsobjectsFromPScustom
             add-content $logfile "---------------------------------------------------------"
             #Filter out custom IPS rules.  For the Trend IPS rules we just need to map the old ID's to the new ID's
             $oldstdipsrules = $oldobjects | where type
-            write-host "There are $oldstdipsrules.count IPS Rules"
+            write-host "There are " $oldstdipsrules.count " IPS Rules"
             #####################Begin much faster code
             ForEach ($oldipsrule in $oldstdipsrules)
 	            {
@@ -1220,6 +1220,7 @@ function update-policyoverrides
                 write-host "Old Policy ID " $importobject.Name
                 #$importobject.Name = $masteridmappings.policies.($importobject.Name)
                 $updatedobjects | Add-Member -MemberType NoteProperty -Name $masteridmappings.policies.($importobject.Name) -Value $importobject.value
+                start-sleep 2
                 #update the policyID
                 write-host "New Policy ID " $masteridmappings.policies.($importobject.Name)
                 }
@@ -1388,7 +1389,7 @@ else
 #send split pscustomobject to $policyIDmappings = new-dsobjectfrompscustom
 #add the objects together using Merge-DSobjects.  Merge-dsobjects needs a uripart so it will be object.policies.hashtable
 #once complete, update $masteridmappings
-<#
+
 if ($loadfile)
     {
     $masteridmappings = Get-Content -Raw -Path $loadfile | ConvertFrom-Json
@@ -1422,7 +1423,7 @@ else
     }
 
 #Level 4 - Import the policy rule overrides for FW, IPS, IM and LI
-#>
+
 
 
 $lfourobjects = @('policiesfirewall','policiesintegritymonitoring','policiesintrusionprevention','policiesloginspection')
