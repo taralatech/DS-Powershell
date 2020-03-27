@@ -11,23 +11,21 @@ This scrips does not check for rule overrides on the target DSM at all.  It simp
 target DSM where the only difference is rule overrides.  The intention of this script is to import config to a freshly built dsm so this
 should never happen unless in the source DSM the default policies have been modified with rule overrides only.  If that's the case, either delete those policies or start from scratch and don't use this script.
 
-Logging is incomplete
-
 When comparing IPS rules, exceptions may occur due to identical keys.  This is safe to ignore and the script will continue running.
 #>
 param (
     [Parameter(Mandatory=$true)][string]$secretkey,
-    [Parameter(Mandatory=$true)][string]$inputdir,
-    [Parameter(Mandatory=$true)][string]$dsmanager,
-    [Parameter(Mandatory=$true)][string]$logfilepath,
-    [Parameter(Mandatory=$true)][string]$prefix,
+    [Parameter(Mandatory=$false)][string]$inputdir,
+    [Parameter(Mandatory=$false)][string]$dsmanager,
+    [Parameter(Mandatory=$false)][string]$logfilepath,
+    [Parameter(Mandatory=$false)][string]$prefix,
     [Parameter(Mandatory=$false)][string]$loadfile
 )
 
 
 #For testing
 #$inputdir = "C:\scripts\log\export-DSM"
-#$dsmanager = "https://deepsec.tarala.me.uk:4119/"
+#$dsmanager = "https://deep.security.manager.com:4119/"
 #$logfilepath = "C:\scripts\log"
 #$prefix = "tst2"
 #$loadfile = "C:\scripts\log\Output-DSPolicies-20200310062411-1.json"
@@ -65,26 +63,18 @@ $lookuptable = @{
 "realTimeScanScheduleID" = "schedules"
 "scheduledScanConfigurationID" = "schedules"
 "globalStatefulConfigurationID" = "statefulconfigurations"
-#These are not "direct" lookups - they are ruleids concatenated with the policy element that uses the ruleIDs because Firewall, IPS, IM and LI engines all just use ruleIDs
-#all of the below are realted to policies only
-"firewallruleIDs" = "firewallrules"
-"intrusionPreventionruleIDs" = "intrusionpreventionrules"
-#IM - insert here
-#LI - insert here
-#these are direct lookups.  They're here for readability because They're related to policies
+#policy lookups
+"intrusionPrevention" = "intrusionpreventionrules"
+"firewall" = "firewallrules"
+"logInspection" = "logInspectionrules"
+"integritymonitoring" = "integritymonitoringrules"
 "applicationTypeIDs" = "applicationtypes"
 "parentID" = "policies"
-#these are used to identify lists one level below for policies
-"antiMalware" = "nested"
-"firewall" = "firewallrules"
-"intrusionPrevention" = "intrusionpreventionrules"
-"integrityMonitoring" = "nested"
-"applicationControl" = "nested"
-"ruleIDs" = "array"
 }
 $arraysubobjectidlist = @('ruleIDs','applicationTypeIDs') # List of arrays of ID's
 $nestedobjectpropertylist = @('policySettings','antiMalware','webReputation','firewall','intrusionPrevention','integrityMonitoring','applicationControl','SAP','logInspection') #list of properties that contain sub properties
 $propertiestoskip = @('originalIssue','lastUpdated','description','sensingMode','containerControl','ID') #ignore these properties for comparison
+$readonlyproperties = @('recommendationsMode')
 $global:irreconcilabledifferences = @{}
 #Create a PScustomObject to store the Object ID mappings - a table to lookup "old" object ID's against the new ID's created on the new DSM
 $masteridmappings = [PSCustomObject]@{}
@@ -296,7 +286,7 @@ Function Get-DSObjects
             else
                 {
                 $dsobjects = Call-Dsapi -headers $headers -method Post -Body $json -uri $geturi -resttimeout $resttimeout -backoffdelay $backoffdelay
-                write-host "merge $dsobjects $dsfullobjects $uripart" -ForegroundColor Yellow -BackgroundColor Blue
+                #write-host "merge $dsobjects $dsfullobjects $uripart" -ForegroundColor Yellow -BackgroundColor Blue
                 $dsfullobjects = Merge-DSobjects $dsobjects $dsfullobjects $uripart
                 }
             write-host "$startid - start id"
@@ -577,7 +567,7 @@ function create-dsobject
         {
         $body = $importobject | convertto-json
         $searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay
-        if ($searchobject.$uripart.Count -ne 0)
+        if ($searchobject.$uripart.Count -ne 0) # Check to see of an object with the same name exists.
             {
             $logname = $searchobject.$uripart.name
             write-host "Search for object has found the new object exists - Name: $logname" -ForegroundColor Yellow
@@ -597,7 +587,7 @@ function create-dsobject
                       } | ConvertTo-Json
             $body = $importobject | convertto-json
             $searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay
-            if ($searchobject.$uripart.Count -ne 0)
+            if ($searchobject.$uripart.Count -ne 0) #Check to see if an object exists even with the prefix added
                  {
                  $logname = $searchobject.$uripart.name
                  write-host "Search for object has found the new prefixed object exists - Name: $logname" -ForegroundColor Yellow
@@ -609,14 +599,19 @@ function create-dsobject
                 {
                 $dsobject = Call-Dsapi -headers $headers -method Post -Body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
                 $newID = $dsobject.ID #check what this returns
+                $logcontent = "New Object created: $logname . prefix added"
+                Add-Content $logfile $logcontent
                 }
 
             }
 
-        else
+        else #Object with the same name does not exist
             {
+            write-host "Just Creating the object as search has found no duplicated" -ForegroundColor Green
             $dsobject = Call-Dsapi -headers $headers -method Post -Body $body -uri $dsobjuri -resttimeout $resttimeout -backoffdelay $backoffdelay
-            $newID = $dsobject.ID #check what this returns
+            $newID = $dsobject.ID
+            $logcontent = "Creating Object. Name is: $logname no prefix added."
+            Add-Content $logfile $logcontent
             }
         }
     END
@@ -650,6 +645,8 @@ function compare-dsobject
         else
             {
             #We know that all of the properties are the same.  Loop through the values comparing.  Set $identical to $false if any properties differ.
+            $logcontent = "Checking Properties and subproperties of objects to see if they are identical.  Imported Object is: " + $importobject.name + "New DSM object is " + $newdsmobject.name
+            Add-Content $logfile $logcontent
             $objproperties = $newdsmobject.psobject.Properties.Name
             $identical = $true
             ForEach ($objproperty in $objproperties)
@@ -672,36 +669,56 @@ function compare-dsobject
                                     {
                                     write-host "array subproperty $subproperty differs" -ForegroundColor Magenta
                                     $identical = $false
+                                    $logcontent = $subproperty + "Subproperty differs"
+                                    Add-Content $logfile $logcontent
                                     }
                                 else
                                     {
                                     write-host "array subproperty $subproperty is the same" -ForegroundColor Cyan
+                                    $logcontent = $subproperty + "Subproperty is the same"
+                                    Add-Content $logfile $logcontent
                                     }                               
                                 }
                             elseif ($importobject.$objproperty.$subproperty -and !($newdsmobject.$objproperty.$subproperty))
                                 {
                                 write-host "array subproperty $subproperty exists on the import file but not the destination object" -ForegroundColor Red
                                 $identical = $false
+                                $logcontent = $subproperty + " exists on the import file but not the destination object"
+                                Add-Content $logfile $logcontent
                                 }
                             elseif (!($importobject.$objproperty.$subproperty) -and $newdsmobject.$objproperty.$subproperty)
                                 {
                                 write-host "array subproperty $subproperty exists on the destination object but not the import file" -ForegroundColor Red
                                 $identical = $false
+                                $logcontent = $subproperty + "exists on the destination object but not the import file"
                                 }
-                            else
+                            else # this should not ever be executed.  The function only prepared properties that exist
                                 {
-                                write-host "array subproperty $subproperty does not exist on either object.  They are the same"
+                                write-host "array subproperty $subproperty does not exist on either object.  They are the same" -ForegroundColor Red
                                 }
                             }
-                        else
+                        elseif ($importobject.$objproperty.$subproperty -and $newdsmobject.$objproperty.$subproperty) #subproperty exists on both - check
                             {
                             $subpropcompare = Compare-Object -ReferenceObject $importobject.$objproperty -DifferenceObject $newdsmobject.$objproperty -Property $subproperty
                             write-host "comparing $subproperty"
                             if ($subpropcompare)
                                 {
                                 $identical = $false
-                                write-host "subproperty $subproperty differs"
+                                write-host "subproperty $subproperty differs" -ForegroundColor Yellow
+                                $logcontent = $subproperty + " differs"
+                                Add-Content $logfile $logcontent
                                 }
+                            }
+                        elseif ($importobject.$objproperty.$subproperty -and !($newdsmobject.$objproperty.$subproperty))
+                            {
+                            write-host "Subproperty $subproperty exists on the imported object but not the target.  Objects are not identical" -ForegroundColor Magenta
+                            $identical = $false
+                            $logcontent = $subproperty + "exists on the imported object but not the target.  Objects are not identical"
+                            Add-Content $logfile $logcontent
+                            }
+                        else #no Situation should exist where neither subproperty exists as the function only checks properties/subproperties reported by either.
+                            {
+                            write-host "Subproperty $subproperty exists on the target object but not the imported object.  Assuming the DSM is a newer version and thus objects are identical" -ForegroundColor Yellow
                             }
                         }
                     }
@@ -718,12 +735,17 @@ function compare-dsobject
                         }
                     else
                         {
-                        #write-host "property $objproperty is identical"
+                        #write-host "property $objproperty is identical" -ForegroundColor Green
+                        #$logcontent = $objproperty + "is identical"
+                        #Add-Content $logfile $logcontent
+                        #commented out as this slowed down the script running.  If logging of identical properties is desired, un comment these.
                         }
                     }
                 else
                     {
                     #log that property is skipped
+                    $logcontent = $objproperty + "Was skipped as it is listed as a property to skip"
+                    Add-Content $logfile $logcontent
                     }
             
                 }
@@ -731,7 +753,6 @@ function compare-dsobject
         }
     END
         {
-        #write-host "end compare-dsobject"
         return $identical
         }
     }
@@ -812,11 +833,21 @@ function replace-dsnestedlists
                         {
                         #Its an array of firewall rules, IPS rules, IM or LI rules
                         $listcheck = $lookuptable.$objproperty #provide replace-dslists information on which object in $masteridmappings to search
+                        if (!($lookuptable.$objproperty))
+                            {
+                            #break
+                            }
+                        write-host "$objproperty Objproperty"-ForegroundColor Cyan
                         $checkobject.$objproperty.$subproperty = replace-dslists -listcheck $listcheck -listIDArray $checkobject.$objproperty.$subproperty
                         }
                     elseif ($subproperty -eq "applicationTypeIDs")
                         {
                         #It's an array of Application types for a policy
+                        if (!($lookuptable.$subproperty))
+                            {
+                            #break
+                            }
+                            write-host "$subproperty Subproperty" -ForegroundColor Cyan
                         $checkobject.$objproperty.$subproperty = replace-dslists -listcheck $lookuptable.$subproperty -listIDArray $checkobject.$objproperty.$subproperty
                         }
                     elseif ($lookuptable.$subproperty)
@@ -1018,7 +1049,6 @@ function Add-DsobjectsFromPScustom
             #Filter out custom IPS rules.  For the Trend IPS rules we just need to map the old ID's to the new ID's
             $oldstdipsrules = $oldobjects | where type
             write-host "There are " $oldstdipsrules.count " IPS Rules"
-            #####################Begin much faster code
             ForEach ($oldipsrule in $oldstdipsrules)
 	            {
 	            $oldipshash.Add($oldipsrule.identifier, $oldipsrule.ID)
@@ -1037,28 +1067,16 @@ function Add-DsobjectsFromPScustom
             	$oldipsruleid = $oldipshash.$ruletoadd
             	$IDmappings.Add($oldipsruleid.ToString(),$newipsruleID.ToString())
             	}
-            #####################end much faster code
-            <#
-            #####################begin removed slower code
-            $ipscounter = 0
-            ForEach ($oldipsrule in $oldstdipsrules)
-                {
-                write-host $ipscounter
-                $ipscounter++
-                #then compare the objects
-                $newipsrule = $newobjects | where identifier -eq $oldipsrule.identifier
-                $originalid = $oldipsrule.ID
-                $newID = $newipsrule.ID
-                $ipsrulename = $oldipsrule.name
-                Write-Host "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
-                add-content $logfile "Original Rule ID: $originalid , new ID: $newID , Name: $ipsrulename"
-                #update masterIDmappings
-                $IDmappings.Add($originalid.ToString(),$newID.ToString())
-                }
-            ########################End removed slower code
-            #>
             #Now to the lookup/add where necessary only for the custom IPS rules
             $filteredrules = $oldobjects | where template
+            ForEach ($ruleobject in $filteredrules)
+                {
+                $updatedobject = replace-dsnestedlists $ruleobject
+                ForEach ($readonlyproperty in $readonlyproperties) #Remove read only properties from object as this caises the API call to fail
+                    {
+                    $ruleobject.psobject.properties.remove($readonlyproperty)
+                    }
+                }
             $dslists = 1
             }
         if ($level -eq 5)
@@ -1067,17 +1085,28 @@ function Add-DsobjectsFromPScustom
             #create uripart array.  array to contain 
             ForEach ($ruleobject in $filteredrules)
                 {
+                #break
                 $updatedobject = replace-dsnestedlists $ruleobject
                 }
             $dslists = 1 #mark that the lists have already been replaced
             }
         if ($level -gt 5)
             {
-            $filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.policies.keys
+            if ($level -eq 6)
+                {
+                $filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.policies.keys
+                }
+            else
+                {
+                $policieslevel = 'policiesLevel' + ($level - 1)
+                $filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.$policieslevel.keys
+                }
+            #$filteredrules = $importobjects.$uripart | where parentID -in $masteridmappings.policies.keys
             write-host "Beginning policies at level $level" -ForegroundColor Yellow
             #create uripart array.  array to contain 
             ForEach ($ruleobject in $filteredrules)
                 {
+                #break
                 $updatedobject = replace-dsnestedlists $ruleobject
                 }
             $dslists = 1 #mark that the lists have already been replaced
@@ -1091,22 +1120,6 @@ function Add-DsobjectsFromPScustom
             $originalid = $ruleobject.ID
             $ruleobject.psobject.Properties.Remove('ID')
             #check if object with same name exists
-            <#
-            #############################################################################Second API call - not needed
-            $searchname = $ruleobject.name
-            $searchjson = @{
-                        "maxItems" = 1
-                        "searchCriteria" = @{
-                                            "fieldName" = "name"
-                                            "stringValue" = $searchname
-                                            "stringTest" = "equal"
-                                            }
-                        "sortByObjectID" = "true"
-                      } | ConvertTo-Json
-            #$searchobject = Call-Dsapi -headers $headers -method Post -Body $searchjson -uri $dssearchuri -resttimeout $resttimeout -backoffdelay $backoffdelay #why call the API twice?$ob
-            #>
-            #Above replaced with below to avoid unnecessary API query
-            
             $searchobject.$uripart = $objectfromdsm.$uripart | where name -EQ $ruleobject.name # this is maintained to avoid refactoring rest of code for now
             $newdsmobject = $objectfromdsm.$uripart | where name -EQ $ruleobject.name
             #If a search for the object by name returns an object, there is a duplicate.  Compare the duplicate and if the same, just update.  If different, create a new object
@@ -1453,8 +1466,6 @@ ForEach ($uripart in $lfourobjects)
     $objectfromfile = Get-Content -Raw -Path $dsimportfile | ConvertFrom-Json
     if ($dsimportobject.count -eq 1)
         {
-        #$idmappings = Add-DsobjectsFromPScustom -importobjects $objectfromfile -uripart $uripart -prefix $prefix -level 4 -furtheruripart $lfourmappings.$uripart
-        #new process is too different to add-dsobjectsfrompscustom
         $updatedoverrides = update-policyoverrides -importobjects $objectfromfile -uripart $lfourmappings.$uripart
         write-host "break"
         add-policyoverrides -importobjects $updatedoverrides -uripart $lfourmappings.$uripart
@@ -1464,9 +1475,7 @@ ForEach ($uripart in $lfourobjects)
         write-host "Directory does not have only one file $uripart" -ForegroundColor Yellow
         Add-Content $logfile "Directory does not have only one file for $uripart"
         }
-    #
     }
-##############################################################
 
 #save the mapping table to disk
 $savejson = $masteridmappings | ConvertTo-Json
