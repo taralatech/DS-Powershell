@@ -24,11 +24,11 @@ param (
 
 
 #For testing
-#$inputdir = "C:\scripts\log\export-DSM"
-#$dsmanager = "https://deep.security.manager.com:4119/"
-#$logfilepath = "C:\scripts\log"
-#$prefix = "tst2"
-#$loadfile = "C:\scripts\log\Output-DSPolicies-20200310062411-1.json"
+$inputdir = "C:\scripts\log\export-DSM"
+$dsmanager = "https://deepsec.tarala.me.uk:4119/"
+$logfilepath = "C:\scripts\log"
+$prefix = "IMPORTED"
+#$loadfile = "C:\scripts\log\Output-DSPolicies-20200328074907-1.json"
 #end testing
 
 #enter the timeout for REST queries here
@@ -130,7 +130,7 @@ param (
                 $dsobject = Invoke-RestMethod -Headers $headers -method Get -Uri $uri -TimeoutSec $resttimeout
                 if ($dsobject)
                     {
-                    Write-Host "ID: $uri Connected! Call-Dsapi" -Foregroundcolor Green
+                    #Write-Host "ID: $uri Connected! Call-Dsapi" -Foregroundcolor Green
                     }
                 else
                     {
@@ -158,7 +158,7 @@ param (
                 $dsobject = Invoke-RestMethod -Headers $headers -method Post -Uri $uri -body $body -TimeoutSec $resttimeout
                 if ($dsobject)
                     {
-                    Write-Host "ID: $uri Connected! Call-Dsapi" -Foregroundcolor Green
+                    #Write-Host "ID: $uri Connected! Call-Dsapi" -Foregroundcolor Green
                     }
                 else
                     {
@@ -1220,7 +1220,9 @@ function update-policyoverrides
                 }
             else
                 {
-                write-host "Update the Object"
+                write-host "Update the Object: " $importobject.name
+                $logcontent = "Update the Object: " + $importobject.name
+                Add-Content $logfile $logcontent
                 ForEach ($ruleobject in $importobject.Value.$uripart)
                     {
                     #Check whether property is one to be replaced
@@ -1232,11 +1234,15 @@ function update-policyoverrides
                             write-host "old value " $ruleproperty.Value
                             $ruleproperty.Value = $masteridmappings.($lookuptable.($ruleproperty.name)).($ruleproperty.Value)
                             write-host "new value " $ruleproperty.Value
+                            $logcontent = "Update the Object: " + $importobject.name
+                            Add-Content $logfile $logcontent
                             }
                         elseif ($ruleproperty.Name -eq "ID")
                             {
-                            write-host "update the ID"
+                            write-host "update $uripart rule ID: " $ruleproperty.value " to " $masteridmappings.$uripart.($ruleproperty.Value)
                             $ruleproperty.Value = $masteridmappings.$uripart.($ruleproperty.Value)
+                            $logcontent = "update $uripart rule ID: " + $ruleproperty.value + " to " + $masteridmappings.$uripart.($ruleproperty.Value)
+                            Add-Content $logfile $logcontent
                             }
                         }
                     }
@@ -1246,6 +1252,8 @@ function update-policyoverrides
                 start-sleep 2
                 #update the policyID
                 write-host "New Policy ID " $masteridmappings.policies.($importobject.Name)
+                $logcontent = "Old Policy ID " + $importobject.Name + " | New Policy ID: " + $masteridmappings.policies.($importobject.Name)
+                Add-Content $logfile $logcontent
                 }
             }
         write-host "Policy Override object update for " $uripart "Completed"
@@ -1317,7 +1325,7 @@ ForEach ($uripart in $loneobjects)
         }
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
-
+$loneobjects = $null
 #Level 2 - Import objects with dependencies to only level One objects
 #Firewall rules (port lists, ip lists, mac lists)
 #IPS application types (port lists)
@@ -1340,7 +1348,7 @@ ForEach ($uripart in $ltwoobjects)
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
     #>
-#Level 2 part 2 - applicationtypes are now exported as a signle file
+#Level 2 version 2 - all onbjects are now exported as a signle file
 if (! $loadfile) {$ltwoobjects = @('firewallrules','antimalwareconfigurations','applicationtypes')}
 ForEach ($uripart in $ltwoobjects)
     {
@@ -1360,11 +1368,7 @@ ForEach ($uripart in $ltwoobjects)
         }
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
-
-
-
-
-
+$ltwoobjects = $null
 
 #level 3 - Import rules.
 #Ips Rules (ips application types)
@@ -1390,7 +1394,7 @@ ForEach ($uripart in $lthreeobjects)
         }
     $masteridmappings | Add-Member -NotePropertyName $uripart -NotePropertyValue $idmappings
     }
-
+$lthreeobjects = $null
 
 if ($loadfile)
     {
@@ -1467,7 +1471,6 @@ ForEach ($uripart in $lfourobjects)
     if ($dsimportobject.count -eq 1)
         {
         $updatedoverrides = update-policyoverrides -importobjects $objectfromfile -uripart $lfourmappings.$uripart
-        write-host "break"
         add-policyoverrides -importobjects $updatedoverrides -uripart $lfourmappings.$uripart
         }
     else
