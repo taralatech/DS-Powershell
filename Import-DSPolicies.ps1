@@ -24,10 +24,10 @@ param (
 
 
 #For testing
-$inputdir = "C:\scripts\log\export-DSM"
-$dsmanager = "https://deepsec.tarala.me.uk:4119/"
-$logfilepath = "C:\scripts\log"
-$prefix = "IMPORTED"
+#$inputdir = "C:\scripts\log\export-DSM"
+#$dsmanager = "https://deepsec.tarala.me.uk:4119/"
+#$logfilepath = "C:\scripts\log"
+#$prefix = "IMPORTED"
 #$loadfile = "C:\scripts\log\Output-DSPolicies-20200328074907-1.json"
 #end testing
 

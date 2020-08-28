@@ -115,7 +115,7 @@ Function Merge-DSobjects
 
 Function Get-AllObjectIDslarge
     {
-    #Due to 500 Item limit, requests need to be split.  This is used to perform multiple API calls and combine the results into one object.
+    #Due to 5000 Item limit, requests need to be split.  This is used to perform multiple API calls and combine the results into one object.
     [CmdletBinding()]
     Param
         (
